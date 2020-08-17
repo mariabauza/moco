@@ -50,7 +50,7 @@ class MoCo(nn.Module):
             param_k.data = param_k.data * self.m + param_q.data * (1. - self.m)
 
     @torch.no_grad()
-    def _dequeue_and_enqueue(self, keys):
+    def _dequeue_and_enqueue(self, keys, indexes = None):
         # gather keys before updating queue
         keys = concat_all_gather(keys)
 
@@ -60,7 +60,11 @@ class MoCo(nn.Module):
         assert self.K % batch_size == 0  # for simplicity
 
         # replace the keys at ptr (dequeue and enqueue)
-        self.queue[:, ptr:ptr + batch_size] = keys.T
+        if indexes is None:
+            self.queue[:, ptr:ptr + batch_size] = keys.T
+        else:
+            self.queue[:, indexes] = keys.T
+
         ptr = (ptr + batch_size) % self.K  # move pointer
 
         self.queue_ptr[0] = ptr
@@ -112,7 +116,7 @@ class MoCo(nn.Module):
 
         return x_gather[idx_this]
 
-    def forward(self, im_q, im_k):
+    def forward(self, im_q, im_k = None, indexes= None):
         """
         Input:
             im_q: a batch of query images
@@ -124,26 +128,26 @@ class MoCo(nn.Module):
         # compute query features
         q = self.encoder_q(im_q)  # queries: NxC
         q = nn.functional.normalize(q, dim=1)
-
+        
+        if im_k is None: return q
+        
         # compute key features
         with torch.no_grad():  # no gradient to keys
             self._momentum_update_key_encoder()  # update the key encoder
 
             # shuffle for making use of BN
             im_k, idx_unshuffle = self._batch_shuffle_ddp(im_k)
-
             k = self.encoder_k(im_k)  # keys: NxC
             k = nn.functional.normalize(k, dim=1)
-
             # undo shuffle
             k = self._batch_unshuffle_ddp(k, idx_unshuffle)
-
         # compute logits
         # Einstein sum is more intuitive
         # positive logits: Nx1
         l_pos = torch.einsum('nc,nc->n', [q, k]).unsqueeze(-1)
         # negative logits: NxK
         l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
+        #l_neg[:,indexes] = -100 # Hack not add to loss
 
         # logits: Nx(1+K)
         logits = torch.cat([l_pos, l_neg], dim=1)
@@ -155,9 +159,21 @@ class MoCo(nn.Module):
         labels = torch.zeros(logits.shape[0], dtype=torch.long).cuda()
 
         # dequeue and enqueue
-        self._dequeue_and_enqueue(k)
-
+        self._dequeue_and_enqueue(k, indexes)
         return logits, labels
+        
+    def encode(self, im):
+        """
+        Input:
+            im: a batch of images
+        Output:
+            encodings
+        """
+
+        # compute query features
+        q = self.encoder_q(im) 
+        q = nn.functional.normalize(q, dim=1)
+        return q
 
 
 # utils
