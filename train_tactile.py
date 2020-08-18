@@ -24,18 +24,25 @@ import torchvision.models as models
 
 import moco.loader
 import moco.builder
-import moco.dataset_tactile
 import moco.dataset_simple
 
 import matplotlib.pyplot as plt
+import sys
+sys.path.append('/home/mcube/tactile_localization/')
+with_tactile=True
+if with_tactile: 
+    from tactile_localization.constants import constants
+    from tactile_localization.classes.grid import Grid2D, Grid3D
+    from tactile_localization.classes.object_manipulator import Object3D
+    from tactile_localization.classes.local_shape import LocalShape, Transformation
+import importlib
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('data', metavar='DIR',
-                    help='path to dataset')
+
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
                     choices=model_names,
                     help='model architecture: ' +
@@ -101,6 +108,11 @@ parser.add_argument('--aug-plus', action='store_true',
 parser.add_argument('--cos', action='store_true',
                     help='use cosine lr schedule')
 
+# Custom
+parser.add_argument('--is_test', action='store_true',
+                    help='if paper or grdi data')
+parser.add_argument('--only_eval', action='store_true',
+                    help=' will build queue')
 
 def main():
     args = parser.parse_args()
@@ -136,8 +148,35 @@ def main():
         # Simply call main_worker function
         main_worker(args.gpu, ngpus_per_node, args)
 
-
+dists = []
 def main_worker(gpu, ngpus_per_node, args):
+    
+    #####################################################################
+    #####################################################################
+    #####################################################################
+    object_name = 'pin_view2'; args.object_name = object_name
+    sensor_name = 'green_sensor'; args.sensor_name = sensor_name
+    grid_name = 'face1'
+    if with_tactile:
+        args.sensor = importlib.import_module('sensors.{}.sensor_params'.format(args.sensor_name))
+        args.object_3D = Object3D(args.object_name, args.sensor, False, False)
+    
+    path_data = 'data/{}_{}'.format(object_name, grid_name)
+    args.path_data = path_data
+    train_dataset = moco.dataset_simple.Dataset(object_name, sensor_name, grid_name)
+    val_dataset = moco.dataset_simple.Dataset(object_name, sensor_name, grid_name, is_test = args.is_test)
+    args.moco_k = train_dataset.len
+    print('Got dataset, val is_test', args.is_test)    
+    import subprocess
+    if not args.only_eval:
+        subprocess.Popen(["python3", "moco/generate_data.py"])
+    #####################################################################
+    #####################################################################
+    #####################################################################
+    
+    
+    
+    
     args.gpu = gpu
     
     # suppress printing if not master
@@ -202,6 +241,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     # optionally resume from a checkpoint
     if args.resume:
+        args.resume = path_data + '/models/' + args.resume
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
             if args.gpu is None:
@@ -219,84 +259,63 @@ def main_worker(gpu, ngpus_per_node, args):
             print("=> no checkpoint found at '{}'".format(args.resume))
 
     cudnn.benchmark = True
-    print('here')
-    # Data loading code
-    traindir = os.path.join(args.data, 'train')
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-    if args.aug_plus:
-        # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
-        augmentation = [
-            transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
-            transforms.RandomApply([
-                transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)  # not strengthened
-            ], p=0.8),
-            transforms.RandomGrayscale(p=0.2),
-            transforms.RandomApply([moco.loader.GaussianBlur([.1, 2.])], p=0.5),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize
-        ]
-    else:
-        # MoCo v1's aug: the same as InstDisc https://arxiv.org/abs/1805.01978
-        augmentation = [
-            transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
-            transforms.RandomGrayscale(p=0.2),
-            transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize
-        ]
-
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        moco.loader.TwoCropsTransform(transforms.Compose(augmentation)))
         
-        
-    object_name = 'grease_view1'
-    object_name = 'pin_view2'
-    sensor_name = 'green_sensor'
-    grid_name = 'face1'
-    
-    
-    path_data = 'data/{}_{}'.format(object_name, grid_name)
-    #train_dataset = moco.dataset_tactile.Dataset(object_name, sensor_name, grid_name)
-    train_dataset = moco.dataset_simple.Dataset(object_name, sensor_name, grid_name)
-    print('Got dataset')
-    import subprocess
-    subprocess.Popen(["python3", "moco/generate_data.py"])
-    
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
     else:
         train_sampler = None
+        cal_sampler = None
     
     train_loader = torch.utils.data.DataLoader(
         dataset=train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
             num_workers=args.workers,
             pin_memory=True, sampler=train_sampler, drop_last=True)
         
+    val_loader = torch.utils.data.DataLoader(
+        dataset=val_dataset, batch_size=args.batch_size, shuffle=(val_sampler is None),
+            num_workers=args.workers,
+            pin_memory=True, sampler=val_sampler, drop_last=True)
 
-    for epoch in range(args.start_epoch, args.epochs):
-        print('Epoch')
-        if args.distributed:
-            train_sampler.set_epoch(epoch)
-        adjust_learning_rate(optimizer, epoch, args)
-        
-        # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, args)
-        
-        if not args.multiprocessing_distributed or (args.multiprocessing_distributed
-                and args.rank % ngpus_per_node == 0):
+    if not args.only_eval:
+        best_dist = 1
+        for epoch in range(args.start_epoch, args.epochs):
+            init = time.time()
             
-            if (epoch +1) % 10 == 0:
-                save_checkpoint({
-                    'epoch': epoch + 1,
-                    'arch': args.arch,
-                    'state_dict': model.state_dict(),
-                    'optimizer' : optimizer.state_dict(),
-                }, is_best=False, filename='checkpoint_{:04d}.pth.tar'.format(epoch))
+            if args.distributed:
+                train_sampler.set_epoch(epoch)
+                print('Epoch', epoch, 'set')
+            adjust_learning_rate(optimizer, epoch, args)
             
+            # train for one epoch
+            dists = train(train_loader, model, criterion, optimizer, epoch, args)
+            print('Epoch: ', epoch, np.median(dists), np.mean(dists))
+            
+            if not args.multiprocessing_distributed or (args.multiprocessing_distributed
+                    and args.rank % ngpus_per_node == 0):
+                
+                if (epoch +1) % 10 == 0:
+                    os.makedirs(path_data + '/models/', exist_ok = True)
+                    save_best = False
+                    if best_dist< np.median(dists):
+                        best_dist = np.copy(np.median(dists))
+                        save_best = True
+                    save_checkpoint({
+                        'epoch': epoch + 1,
+                        'arch': args.arch,
+                        'state_dict': model.state_dict(),
+                        'optimizer' : optimizer.state_dict(),
+                    }, is_best=save_best, filename= path_data + '/models/checkpoint_{:04d}.pth.tar'.format(epoch))
+                        # train for one epoch
+            print('Time: ', time.time()-init)
+    
+    update_queue(train_loader, model, args)
+    # train for one epoch
+    dists = evaluate(val_loader, model, criterion, path_data, args)
+
+    np.save(path_data + 'errors.npy', dists)
+    print(np.median(dists), np.mean(dists))
+    
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
     batch_time = AverageMeter('Time', ':6.3f')
@@ -312,20 +331,26 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     # switch to train mode
     model.train()
     end = time.time()
-    #for i, (images, _) in enumerate(train_loader):
+    dists_all = []
+    
     for i, images in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
+        
+        #####################################################################
         if args.gpu is not None:
             images[0] = images[0].cuda(args.gpu, non_blocking=True)
             images[1] = images[1].cuda(args.gpu, non_blocking=True)
             indexes = images[2]
+        #####################################################################    
+        
         # compute output
         output, target = model(im_q=images[0], im_k=images[1], indexes = indexes)
         loss = criterion(output, target)
         # acc1/acc5 are (K+1)-way contrast classifier accuracy
         # measure accuracy and record loss
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        res, dists = accuracy(output, target, args, topk=(1, 5), visualize = args.path_data)
+        acc1, acc5 = res
         losses.update(loss.item(), images[0].size(0))
         top1.update(acc1[0], images[0].size(0))
         top5.update(acc5[0], images[0].size(0))
@@ -342,12 +367,80 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         if i % args.print_freq == 0:
             progress.display(i)
     progress.display(len(train_loader)-1)
-
+    dists_all.append(dists)
+    return dists_all
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')
+
+def evaluate(train_loader, model, criterion, path_data, args):
+    batch_time = AverageMeter('Time', ':6.3f')
+    data_time = AverageMeter('Data', ':6.3f')
+    losses = AverageMeter('Loss', ':.4e')
+    top1 = AverageMeter('Acc@1', ':6.2f')
+    top5 = AverageMeter('Acc@5', ':6.2f')
+    epoch = 0
+    progress = ProgressMeter(
+        len(train_loader),
+        [batch_time, data_time, losses, top1, top5],
+        prefix="Epoch: [{}]".format(epoch))
+
+    
+    model.eval()
+    end = time.time()
+    dists_all = []
+    
+    for i, images in enumerate(train_loader):
+        # measure data loading time
+        data_time.update(time.time() - end)
+        if args.gpu is not None:
+            images[0] = images[0].cuda(args.gpu, non_blocking=True)
+            images[1] = images[1].cuda(args.gpu, non_blocking=True)
+            indexes = images[2]
+        # compute output
+        queries = model(images[0])
+        queries = nn.functional.normalize(queries, dim=1)
+        
+        output = torch.einsum('nc,ck->nk', [queries, model.queue.clone().detach()])
+        target = indexes.cuda()
+        loss = criterion(output, target)
+        # acc1/acc5 are (K+1)-way contrast classifier accuracy
+        # measure accuracy and record loss
+        res, dists = accuracy(output, target, args, topk=(1, 5), visualize = path_data)
+        print(np.median(dists), np.mean(dists))
+        acc1, acc5 = res
+        losses.update(loss.item(), images[0].size(0))
+        top1.update(acc1[0], images[0].size(0))
+        top5.update(acc5[0], images[0].size(0))
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        if i % args.print_freq == 0:
+            progress.display(i)
+        dists_all.append(dists)
+    return dists_all
+
+def update_queue(train_loader, model, args):
+    
+    model.eval()
+    #print(model.named_modules)
+    model.register_buffer("queue", torch.randn(args.moco_dim, args.moco_k))
+    model.queue = nn.functional.normalize(model.queue, dim=0).cuda()
+    for i, images in enumerate(train_loader):
+        
+        if args.gpu is not None:
+            #images[0] = images[0].cuda(args.gpu, non_blocking=True)
+            images[1] = images[1].cuda(args.gpu, non_blocking=True)
+            indexes = images[2]
+        keys = model(images[1])
+        keys = nn.functional.normalize(keys, dim=1)
+        
+        keys = moco.builder.concat_all_gather(keys)
+        model.queue[:, indexes] = keys.T
 
 
 class AverageMeter(object):
@@ -403,7 +496,7 @@ def adjust_learning_rate(optimizer, epoch, args):
         param_group['lr'] = lr
 
 
-def accuracy(output, target, topk=(1,)):
+def accuracy2(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():
         maxk = max(topk)
@@ -419,6 +512,72 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
+        
+
+import glob
+import cv2
+import numpy as np
+def accuracy(output, target, args, topk=(1,), visualize = None):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        
+        if  with_tactile and visualize is not None:
+            dists =[]
+            
+            list_images = glob.glob(visualize + '/train/*/0.png')
+            list_images.sort(key=os.path.getmtime)
+            if args.is_test:
+                list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*png'.format(args.object_name))
+                list_images2.sort(key=os.path.getmtime)
+            else:
+                list_images2 = list_images
+
+            for i in range(batch_size):
+                path_pred = list_images[pred[0,i]]
+                transformation = np.load(path_pred.replace('0.png', 'transformation.npy'))
+                
+                path_query = list_images2[target[i]]
+                if not args.is_test:
+                    path_query = path_query.replace('0.png', '1.png')
+                    trans_path = path_query.replace('1.png', 'transformation.npy')
+                    
+                    transformation_real = np.load(trans_path)
+                else:
+                    transformation_real = np.load(path_query.replace('true_LS', 'trans').replace('png', 'npy'))
+                    transformation_real[2,3] *=-1
+                
+                
+                dist = args.object_3D.poseDistance(Transformation(transformation), Transformation(transformation_real))
+                dists.append(dist)
+                if visualize:
+                    if i == 0:
+                        saving_path = visualize + '/debug_images/'
+                        os.makedirs(saving_path, exist_ok = True)
+                    query = cv2.resize(cv2.imread(path_query), (235,235))
+                    prediction = cv2.imread(path_pred)
+                    print(args.is_test, np.amax(query), np.amin(query))
+                    print(False, np.amax(prediction), np.amin(prediction))
+                    result_img = np.concatenate([query, prediction, np.abs(query-prediction)], axis=1)
+                    plt.imshow(result_img); 
+                    plt.savefig(saving_path +'{}_correct={}.png'.format(target[i],correct[0,i]) ); plt.show()
+                    plt.close()
+                    
+                    plt.imshow(result_img)
+                    plt.savefig(saving_path +'dist={}_{}.png'.format(dist, target[i]) ); plt.close()
+            return res, dists
+    return res, [1000]*batch_size
 
 
 if __name__ == '__main__':

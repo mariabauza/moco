@@ -1,4 +1,4 @@
-from glob import glob
+import glob
 import numpy as np
 import cv2
 import os
@@ -21,7 +21,7 @@ object_name = np.load('moco/object_name.npy')
 grid_name = np.load('moco/grid_name.npy')  
 
 
-print(sensor_name, object_name, grid_name)
+print('Generate data from:', sensor_name, object_name, grid_name)
 
 grids = []; i = np.copy(grid_name)        
 configs = []
@@ -35,12 +35,8 @@ else:
     object_3D = Object3D(object_name, sensor, False, False)
 
 
-last_path = None
-path = None
-
-
 def generate_noisy_sample(path):
-    transformation = Transformation(np.load(path[0].replace('0.png','transformation.npy')))
+    transformation = Transformation(np.load(path.replace('0.png','transformation.npy')))
     count = 0
     while True:
         transformation2 = transformation.noisyTransformation(max_dx = 0.0005, max_dy = 0.0005, max_dangle = 0.25)
@@ -50,22 +46,26 @@ def generate_noisy_sample(path):
         else: 
             count += 1
             if count > 100: # Hack
-                os.system('cp {}  {}'.format(path[0], path[0].replace('0.png', '1.png')))
+                print('No LS for this one')
+                os.system('cp {}  {}'.format(path, path.replace('0.png', '1.png')))
                 return
     
     ls.toPNG(sensor)
-    cv2.imwrite(path[0].replace('0.png', '1.png'), ls.ls)
+    cv2.imwrite(path.replace('0.png', '1.png'), ls.ls)
     return
 
 if __name__ == "__main__":
     while True:
-        try:
-            path = np.load('moco/last_item.npy')
-        except:
-            #print('no last item')
-            pass
-        if path is not None and path[0][-3:] != 'png': print('incomplete'); continue
-        if path == last_path: continue
+        list_files = glob.glob('/home/mcube/moco/tmp_data/*{}*.npy'.format(object_name))
+        list_files.sort(key=os.path.getmtime)
+        if len(list_files) > 0:
+            while os.path.exists(list_files[0]):
+                try:
+                    path = np.load(list_files[0])[0]
+                    break
+                except:
+                    print(list_files[0])
+        else: continue
         
-        last_path = np.copy(path)
         generate_noisy_sample(path)
+        os.system('rm {}'.format(list_files[0]))

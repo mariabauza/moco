@@ -57,10 +57,10 @@ class MoCo(nn.Module):
         batch_size = keys.shape[0]
 
         ptr = int(self.queue_ptr)
-        assert self.K % batch_size == 0  # for simplicity
 
         # replace the keys at ptr (dequeue and enqueue)
         if indexes is None:
+            assert self.K % batch_size == 0  # for simplicity
             self.queue[:, ptr:ptr + batch_size] = keys.T
         else:
             self.queue[:, indexes] = keys.T

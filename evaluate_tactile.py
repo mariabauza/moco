@@ -24,7 +24,6 @@ import torchvision.models as models
 
 import moco.loader
 import moco.builder
-import moco.dataset_tactile
 import moco.dataset_simple
 
 import matplotlib.pyplot as plt
@@ -250,16 +249,21 @@ def main_worker(gpu, ngpus_per_node, args):
         traindir,
         moco.loader.TwoCropsTransform(transforms.Compose(augmentation)))
         
-        
+    #####################################################################
+    #####################################################################
+    #####################################################################
     object_name = 'pin_view2'; args.object_name = object_name
     sensor_name = 'green_sensor'; args.sensor_name = sensor_name
     grid_name = 'face1'
     path_data = 'data/{}_{}'.format(object_name, grid_name)
-    #train_dataset = moco.dataset_tactile.Dataset(object_name, sensor_name, grid_name)
     train_dataset = moco.dataset_simple.Dataset(object_name, sensor_name, grid_name, is_test = False)
     val_dataset = moco.dataset_simple.Dataset(object_name, sensor_name, grid_name, is_test = args.is_test)
+    
     import subprocess
     #subprocess.Popen(["python3", "moco/generate_data.py"])
+    #####################################################################
+    #####################################################################
+    #####################################################################
     
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
@@ -267,9 +271,6 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         train_sampler = None
         cal_sampler = None
-    
-    
-    
     
     train_loader = torch.utils.data.DataLoader(
         dataset=train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
@@ -281,13 +282,17 @@ def main_worker(gpu, ngpus_per_node, args):
             num_workers=args.workers,
             pin_memory=True, sampler=val_sampler, drop_last=True)
         
-
+    #####################################################################
+    #####################################################################
     update_queue(train_loader, model, args)
     # train for one epoch
     evaluate(val_loader, model, criterion, path_data, args)
     if args.is_test:
         np.save('errors.npy', dists)
         print(np.median(dists), np.mean(dists))
+    #####################################################################
+    #####################################################################
+    
 
 
 def evaluate(train_loader, model, criterion, path_data, args):
