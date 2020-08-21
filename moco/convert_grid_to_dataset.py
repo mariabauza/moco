@@ -19,7 +19,7 @@ except: missing_libs.append('pyquaternion')
 
 
 
-object_name = 'pin_view2'
+object_name = 'curved_view1'
 sensor_name = 'green_sensor'
 grid_name = 'face1'
 
@@ -42,7 +42,7 @@ for it, path in enumerate(paths):
     os.makedirs(data_path + element_name, exist_ok = True)
     os.system('cp {} {}/0.png'.format(path, data_path + element_name))
     os.system('cp {} {}/transformation.npy'.format(path.replace('local_shape', 'transformation').replace('.png','.npy'), data_path + element_name))
-    path2 = ['{}/0.png'.format( data_path + element_name)]
+    path2 = '{}/0.png'.format( data_path + element_name)
     generate_data.generate_noisy_sample(path2)
 
 

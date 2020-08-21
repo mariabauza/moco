@@ -9,23 +9,30 @@ import importlib
 import time
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, object_name, sensor_name, grid_name, is_test =False):
+    def __init__(self, args,is_train = False):
         super().__init__()
         
-        self.object_name = object_name
-        data_path = 'data/{}_{}/train/'.format(object_name,grid_name)
-        self.is_test=is_test
+        self.object_name = args.object_name
+        data_path = 'data/{}_{}/train/'.format(self.object_name,args.grid_name)
+        
+        self.is_test=args.is_test
+        if is_train: self.is_test = False
+        self.is_real=args.is_real
+        self.is_detectron2=args.is_detectron2
         if self.is_test:
             print('Loading paper data')
-            self.list_images = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*png'.format(object_name))
+            if self.is_real:
+                self.list_images = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_LS*png'.format(self.object_name))
+            else:
+                self.list_images = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_true_LS*png'.format(self.object_name))
         else:
             self.list_images = glob.glob(data_path + '*/0.png')
         self.list_images.sort(key=os.path.getmtime)
-        np.save('moco/object_name.npy',object_name)
-        np.save('moco/grid_name.npy',grid_name)
-        np.save('moco/sensor_name.npy',sensor_name)
+        np.save('moco/object_name.npy',self.object_name)
+        np.save('moco/grid_name.npy',args.grid_name)
+        np.save('moco/sensor_name.npy',args.sensor_name)
         self.tmp_data_path = '/home/mcube/moco/tmp_data/'
-        tmp_data = self.tmp_data_path + '*{}*.npy'.format(object_name)
+        tmp_data = self.tmp_data_path + '*{}*.npy'.format(self.object_name)
         if len(glob.glob(tmp_data)):
             os.system('rm ' + tmp_data)
         print('Done dataset init')
@@ -50,18 +57,29 @@ class Dataset(torch.utils.data.Dataset):
     def __getitem__(self, it):
 
         item = self.list_images[it]
-        ls1 = cv2.resize(cv2.imread(item), (200,200) ).astype(np.float32)
-        
-        try:
-            if self.is_test:  #NO given LS for testing with real data
-                ls2 = np.copy(ls1)
-            else:
-                ls2 = cv2.resize(cv2.imread(item.replace('0.png','1.png')), (200,200) ).astype(np.float32)
-        except:
-            print('No ls2', item)
-            pass
-        if len(glob.glob(self.tmp_data_path + '*{}*.npy'.format(self.object_name) )) < self.len:
+        if self.is_test and self.is_detectron2:
+            mask_num = item.replace('.png', '').split('_')[-1]
+            item = '/home/mcube/claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(self.object_name, self.object_name, mask_num)
+        ls1 = cv2.resize(cv2.imread(item), (200,200) ).astype(np.float32) 
+        ls2 = None
+        while ls2 is None:
+            try:
+                if self.is_test:  #NO given LS for testing with real data
+                    ls2 = np.copy(ls1)
+                else:
+                    ls2 = cv2.resize(cv2.imread(item.replace('0.png','1.png')), (200,200) ).astype(np.float32)
+                    max_val = np.amin(ls2) + np.random.randint(int(51/5),51)
+                    ls2 = (ls2>max_val).astype(np.float32)*255.0
+            except:
+                print('No ls2', item)
+                pass
+        if not self.is_test and len(glob.glob(self.tmp_data_path + '*{}*.npy'.format(self.object_name) )) < self.len:
             np.save(self.tmp_data_path + '{}_{}_{}.npy'.format(self.object_name, it, time.time()),[item])
+        is_binary = True
+        #is_binary = False
+        if is_binary:
+            ls1 = np.amax(ls1) - ls1
+            ls2 = np.amax(ls2) - ls2
         ls1 = ls1.swapaxes(0,2).swapaxes(1,2)
         ls2 = ls2.swapaxes(0,2).swapaxes(1,2)
         

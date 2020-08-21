@@ -39,7 +39,7 @@ def generate_noisy_sample(path):
     transformation = Transformation(np.load(path.replace('0.png','transformation.npy')))
     count = 0
     while True:
-        transformation2 = transformation.noisyTransformation(max_dx = 0.0005, max_dy = 0.0005, max_dangle = 0.25)
+        transformation2 = transformation.noisyTransformation(max_dx = constants.TRANSLATION_INCREMENT/2.0, max_dy = constants.TRANSLATION_INCREMENT/2.0, max_dangle =constants.ANGLE_INCREMENT/2.0)
         ls, transformation_real = object_3D.renderTransformation(transformation2)
         if ls is not None:
             break

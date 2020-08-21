@@ -15,26 +15,41 @@ from tactile_localization.classes.local_shape import LocalShape, Transformation
 
 
 sensor_name = 'green_sensor'
-object_name = 'pin_view2'
+object_name = 'curved_view1'
 sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
 list_images = glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*npy'.format(object_name))
 list_images2 = glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_LS*npy'.format(object_name))
 
+sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
+object_3D = Object3D(object_name, sensor, False, False)
+
+# Change detectron2
+#aa = glob.glob('*npy')
+#for a in aa:   
+#cv2.imwrite(a.replace('.npy','.png'), (1-np.load(a))*255)
 for item in list_images:
         
     png_item = item.replace('.npy','.png')
     if not os.path.exists(png_item):
-        ls = np.load(item)
-        ls = (ls - sensor.DESIRED_DIST)/(sensor.MAX_VAL_DEPTH - sensor.DESIRED_DIST)*255
-        print(png_item)
-        cv2.imwrite(png_item, ls)
+        transformation = np.load(item.replace('ed_true_LS', "ed_trans"))
+        
+        transformation[2,3] *= -1 
+        ls, transformation_real = object_3D.renderTransformation(Transformation(transformation))
+        
+        if ls is None:
+            print('No LS for item:', item)
+            continue
+        else: 
+            ls.toPNG(sensor)
+            cv2.imwrite(png_item, ls.ls)
+            print('Done:', item)
 
 
 for item in list_images2:
     
     real_ls = LocalShape(np.load(item))
     png_item = item.replace('.npy','.png')
-    if 1 or not os.path.exists(png_item):
+    if not os.path.exists(png_item):
         try:
             transformation_real = Transformation(np.load(item.replace('ed_LS', 'ed_trans')))
             if 'head' in object_name:

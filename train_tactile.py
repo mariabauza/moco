@@ -8,6 +8,7 @@ import random
 import shutil
 import time
 import warnings
+import copy
 
 import torch
 import torch.nn as nn
@@ -28,14 +29,6 @@ import moco.dataset_simple
 
 import matplotlib.pyplot as plt
 import sys
-sys.path.append('/home/mcube/tactile_localization/')
-with_tactile=True
-if with_tactile: 
-    from tactile_localization.constants import constants
-    from tactile_localization.classes.grid import Grid2D, Grid3D
-    from tactile_localization.classes.object_manipulator import Object3D
-    from tactile_localization.classes.local_shape import LocalShape, Transformation
-import importlib
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -109,10 +102,32 @@ parser.add_argument('--cos', action='store_true',
                     help='use cosine lr schedule')
 
 # Custom
+parser.add_argument('--is_detectron2', action='store_true',
+                    help='if real of true paper data')
+parser.add_argument('--is_real', action='store_true',
+                    help='if real of true paper data')
 parser.add_argument('--is_test', action='store_true',
                     help='if paper or grdi data')
 parser.add_argument('--only_eval', action='store_true',
                     help=' will build queue')
+parser.add_argument('--object_name', default='', type=str, 
+                    help='object name')
+parser.add_argument('--grid_name', default='', type=str, 
+                    help=' grid name')
+parser.add_argument('--sensor_name', default='', type=str, 
+                    help='sensor name')                                        
+parser.add_argument('--vis', default='', type=str, 
+                    help='sensor name')                                        
+
+
+sys.path.append('/home/mcube/tactile_localization/')
+with_tactile=parser.parse_args().only_eval
+if with_tactile: 
+    from tactile_localization.constants import constants
+    from tactile_localization.classes.grid import Grid2D, Grid3D
+    from tactile_localization.classes.object_manipulator import Object3D
+    from tactile_localization.classes.local_shape import LocalShape, Transformation
+import importlib
 
 def main():
     args = parser.parse_args()
@@ -154,19 +169,22 @@ def main_worker(gpu, ngpus_per_node, args):
     #####################################################################
     #####################################################################
     #####################################################################
-    object_name = 'pin_view2'; args.object_name = object_name
-    sensor_name = 'green_sensor'; args.sensor_name = sensor_name
-    grid_name = 'face1'
+    object_name = args.object_name
+    sensor_name = args.sensor_name
+    grid_name = args.grid_name
+    print(object_name, sensor_name, grid_name)  
     if with_tactile:
         args.sensor = importlib.import_module('sensors.{}.sensor_params'.format(args.sensor_name))
         args.object_3D = Object3D(args.object_name, args.sensor, False, False)
     
     path_data = 'data/{}_{}'.format(object_name, grid_name)
+    
     args.path_data = path_data
-    train_dataset = moco.dataset_simple.Dataset(object_name, sensor_name, grid_name)
-    val_dataset = moco.dataset_simple.Dataset(object_name, sensor_name, grid_name, is_test = args.is_test)
+    
+    train_dataset = moco.dataset_simple.Dataset(args, is_train = True)
+    val_dataset = moco.dataset_simple.Dataset(args)
     args.moco_k = train_dataset.len
-    print('Got dataset, val is_test', args.is_test)    
+    print('Got dataset, val is_test', args.is_test, 'is_real', args.is_real)    
     import subprocess
     if not args.only_eval:
         subprocess.Popen(["python3", "moco/generate_data.py"])
@@ -313,8 +331,8 @@ def main_worker(gpu, ngpus_per_node, args):
     # train for one epoch
     dists = evaluate(val_loader, model, criterion, path_data, args)
 
-    np.save(path_data + 'errors.npy', dists)
-    print(np.median(dists), np.mean(dists))
+    np.save(path_data + '/errors.npy', dists)
+    print('Median and mean:', np.median(dists), np.mean(dists))
     
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
@@ -349,7 +367,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         loss = criterion(output, target)
         # acc1/acc5 are (K+1)-way contrast classifier accuracy
         # measure accuracy and record loss
-        res, dists = accuracy(output, target, args, topk=(1, 5), visualize = args.path_data)
+        res, dists = accuracy(output, target, args, topk=(1, 5))
         acc1, acc5 = res
         losses.update(loss.item(), images[0].size(0))
         top1.update(acc1[0], images[0].size(0))
@@ -408,7 +426,7 @@ def evaluate(train_loader, model, criterion, path_data, args):
         loss = criterion(output, target)
         # acc1/acc5 are (K+1)-way contrast classifier accuracy
         # measure accuracy and record loss
-        res, dists = accuracy(output, target, args, topk=(1, 5), visualize = path_data)
+        res, dists = accuracy(output, target, args, topk=(1, 5))
         print(np.median(dists), np.mean(dists))
         acc1, acc5 = res
         losses.update(loss.item(), images[0].size(0))
@@ -422,6 +440,7 @@ def evaluate(train_loader, model, criterion, path_data, args):
         if i % args.print_freq == 0:
             progress.display(i)
         dists_all.append(dists)
+        print('Median and mean so far:', np.median(dists_all), np.mean(dists_all))
     return dists_all
 
 def update_queue(train_loader, model, args):
@@ -517,7 +536,7 @@ def accuracy2(output, target, topk=(1,)):
 import glob
 import cv2
 import numpy as np
-def accuracy(output, target, args, topk=(1,), visualize = None):
+def accuracy(output, target, args, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():
         maxk = max(topk)
@@ -533,13 +552,16 @@ def accuracy(output, target, args, topk=(1,), visualize = None):
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         
-        if  with_tactile and visualize is not None:
+        if  with_tactile:
             dists =[]
             
-            list_images = glob.glob(visualize + '/train/*/0.png')
+            list_images = glob.glob(args.path_data + '/train/*/0.png')
             list_images.sort(key=os.path.getmtime)
             if args.is_test:
-                list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*png'.format(args.object_name))
+                if args.is_real:
+                    list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_LS*png'.format(args.object_name))
+                else:
+                    list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*png'.format(args.object_name))
                 list_images2.sort(key=os.path.getmtime)
             else:
                 list_images2 = list_images
@@ -555,27 +577,31 @@ def accuracy(output, target, args, topk=(1,), visualize = None):
                     
                     transformation_real = np.load(trans_path)
                 else:
-                    transformation_real = np.load(path_query.replace('true_LS', 'trans').replace('png', 'npy'))
+                    transformation_real = np.load(path_query.replace('true_LS', 'trans').replace('LS', 'trans').replace('png', 'npy'))
                     transformation_real[2,3] *=-1
                 
                 
                 dist = args.object_3D.poseDistance(Transformation(transformation), Transformation(transformation_real))
                 dists.append(dist)
-                if visualize:
+                if args.vis:
                     if i == 0:
-                        saving_path = visualize + '/debug_images/'
+                        saving_path = args.path_data + '/debug_images/'
                         os.makedirs(saving_path, exist_ok = True)
+                    if args.is_test and args.is_detectron2:
+                        mask_num = path_query.replace('.png', '').split('_')[-1]
+                        path_query = '/home/mcube/claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(args.object_name, args.object_name, mask_num)
                     query = cv2.resize(cv2.imread(path_query), (235,235))
+                    query = (query>250).astype('uint8')*255.0
                     prediction = cv2.imread(path_pred)
-                    print(args.is_test, np.amax(query), np.amin(query))
-                    print(False, np.amax(prediction), np.amin(prediction))
+                    prediction = (prediction>250).astype('uint8')*255.0
                     result_img = np.concatenate([query, prediction, np.abs(query-prediction)], axis=1)
-                    plt.imshow(result_img); 
-                    plt.savefig(saving_path +'{}_correct={}.png'.format(target[i],correct[0,i]) ); plt.show()
-                    plt.close()
+                    plt.imshow(np.array(result_img,np.int32)); 
+                    plt.savefig(saving_path +'{}_correct={}.png'.format(target[i],correct[0,i]) ); plt.close()
                     
-                    plt.imshow(result_img)
-                    plt.savefig(saving_path +'dist={}_{}.png'.format(dist, target[i]) ); plt.close()
+                    plt.imshow(np.array(result_img,np.int32)); 
+                    plt.savefig(saving_path +'dist={}_{}.png'.format(dist, target[i]) ); 
+                    #if dist > 0.01: plt.show()
+                    plt.close()
             return res, dists
     return res, [1000]*batch_size
 
