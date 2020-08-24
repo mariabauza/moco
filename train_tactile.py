@@ -118,6 +118,12 @@ parser.add_argument('--sensor_name', default='', type=str,
                     help='sensor name')                                        
 parser.add_argument('--vis', default='', type=str, 
                     help='sensor name')                                        
+parser.add_argument('--input_pose', action='store_true',
+                    help='if paper or grdi data')                                      
+parser.add_argument('--is_binary', action='store_true',
+                    help='if paper or grdi data')                                        
+parser.add_argument('--model_dir', default='', type=str, 
+                    help='folder save checkpoints')                                        
 
 
 sys.path.append('/home/mcube/tactile_localization/')
@@ -162,6 +168,7 @@ def main():
     else:
         # Simply call main_worker function
         main_worker(args.gpu, ngpus_per_node, args)
+    args.model_dir += '/'
 
 dists = []
 def main_worker(gpu, ngpus_per_node, args):
@@ -169,6 +176,8 @@ def main_worker(gpu, ngpus_per_node, args):
     #####################################################################
     #####################################################################
     #####################################################################
+    
+    
     object_name = args.object_name
     sensor_name = args.sensor_name
     grid_name = args.grid_name
@@ -176,10 +185,14 @@ def main_worker(gpu, ngpus_per_node, args):
     if with_tactile:
         args.sensor = importlib.import_module('sensors.{}.sensor_params'.format(args.sensor_name))
         args.object_3D = Object3D(args.object_name, args.sensor, False, False)
-    
+        args.grid = Grid2D(args.object_name, args.sensor, args.grid_name)
     path_data = 'data/{}_{}'.format(object_name, grid_name)
     
     args.path_data = path_data
+    
+    os.makedirs(path_data + '/models/', exist_ok = True)
+    os.makedirs(path_data + '/models/' + args.model_dir, exist_ok = True)
+    
     
     train_dataset = moco.dataset_simple.Dataset(args, is_train = True)
     val_dataset = moco.dataset_simple.Dataset(args)
@@ -259,7 +272,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     # optionally resume from a checkpoint
     if args.resume:
-        args.resume = path_data + '/models/' + args.resume
+        args.resume = path_data + '/models/' + args.model_dir +'/' + args.resume
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
             if args.gpu is None:
@@ -313,7 +326,6 @@ def main_worker(gpu, ngpus_per_node, args):
                     and args.rank % ngpus_per_node == 0):
                 
                 if (epoch +1) % 10 == 0:
-                    os.makedirs(path_data + '/models/', exist_ok = True)
                     save_best = False
                     if best_dist< np.median(dists):
                         best_dist = np.copy(np.median(dists))
@@ -323,17 +335,17 @@ def main_worker(gpu, ngpus_per_node, args):
                         'arch': args.arch,
                         'state_dict': model.state_dict(),
                         'optimizer' : optimizer.state_dict(),
-                    }, is_best=save_best, filename= path_data + '/models/checkpoint_{:04d}.pth.tar'.format(epoch))
+                    }, is_best=save_best, filename= path_data + '/models/{}/checkpoint_{:04d}.pth.tar'.format(args.model_dir, epoch))
                         # train for one epoch
             print('Time: ', time.time()-init)
     
     update_queue(train_loader, model, args)
     # train for one epoch
-    dists = evaluate(val_loader, model, criterion, path_data, args)
-
-    np.save(path_data + '/errors.npy', dists)
-    print('Median and mean:', np.median(dists), np.mean(dists))
-    
+    dists, closest_dists = evaluate(val_loader, model, criterion, path_data, args)
+    case_name = 'checkpoint={}_is_test={}_is_real={}_is_detectron2={}'.format(args.resume[:-8].split('_')[-1], args.is_test, args.is_real, args.is_detectron2)
+    np.save(path_data + '/models/' + args.model_dir + '/errors_{}.npy'.format(case_name), dists)
+    print('Median and mean:', np.median(dists), np.mean(dists), 'Closests Median and mean:', np.median(closest_dists), np.mean(closest_dists))
+    np.save(path_data + '/models/' + args.model_dir + '/closest_errors_{}.npy'.format(case_name), closest_dists)    
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
     batch_time = AverageMeter('Time', ':6.3f')
@@ -350,6 +362,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     model.train()
     end = time.time()
     dists_all = []
+    closest_dists_all = []
     
     for i, images in enumerate(train_loader):
         # measure data loading time
@@ -367,7 +380,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         loss = criterion(output, target)
         # acc1/acc5 are (K+1)-way contrast classifier accuracy
         # measure accuracy and record loss
-        res, dists = accuracy(output, target, args, topk=(1, 5))
+        res, dists, closest_dists = accuracy(output, target, args, topk=(1, 5))
         acc1, acc5 = res
         losses.update(loss.item(), images[0].size(0))
         top1.update(acc1[0], images[0].size(0))
@@ -386,7 +399,8 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
             progress.display(i)
     progress.display(len(train_loader)-1)
     dists_all.append(dists)
-    return dists_all
+    closest_dists_all.append(dists)
+    return dists_all, closest_dists_all
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
@@ -409,6 +423,7 @@ def evaluate(train_loader, model, criterion, path_data, args):
     model.eval()
     end = time.time()
     dists_all = []
+    closest_dists_all = []
     
     for i, images in enumerate(train_loader):
         # measure data loading time
@@ -426,8 +441,8 @@ def evaluate(train_loader, model, criterion, path_data, args):
         loss = criterion(output, target)
         # acc1/acc5 are (K+1)-way contrast classifier accuracy
         # measure accuracy and record loss
-        res, dists = accuracy(output, target, args, topk=(1, 5))
-        print(np.median(dists), np.mean(dists))
+        res, dists, closest_dists = accuracy(output, target, args, topk=(1, 5))
+        print(np.median(dists), np.mean(dists), 'closests:', np.median(closest_dists), np.mean(closest_dists))
         acc1, acc5 = res
         losses.update(loss.item(), images[0].size(0))
         top1.update(acc1[0], images[0].size(0))
@@ -440,8 +455,9 @@ def evaluate(train_loader, model, criterion, path_data, args):
         if i % args.print_freq == 0:
             progress.display(i)
         dists_all.append(dists)
+        closest_dists_all.append(closest_dists)
         print('Median and mean so far:', np.median(dists_all), np.mean(dists_all))
-    return dists_all
+    return dists_all, closest_dists_all
 
 def update_queue(train_loader, model, args):
     
@@ -554,6 +570,7 @@ def accuracy(output, target, args, topk=(1,)):
         
         if  with_tactile:
             dists =[]
+            closest_dists =[]
             
             list_images = glob.glob(args.path_data + '/train/*/0.png')
             list_images.sort(key=os.path.getmtime)
@@ -576,13 +593,18 @@ def accuracy(output, target, args, topk=(1,)):
                     trans_path = path_query.replace('1.png', 'transformation.npy')
                     
                     transformation_real = np.load(trans_path)
+                    closest_dist = args.grid.closestElement(Transformation(transformation_real))
                 else:
                     transformation_real = np.load(path_query.replace('true_LS', 'trans').replace('LS', 'trans').replace('png', 'npy'))
                     transformation_real[2,3] *=-1
-                
+                    closest_dist = np.load(path_query.replace('_true', '').replace('ed_LS', 'ed_dist_closest_trans').replace('png', 'npy'))
                 
                 dist = args.object_3D.poseDistance(Transformation(transformation), Transformation(transformation_real))
+                #transformation = Transformation(helper.single_filterreg_run(local_shape.ls, ICP_ls, 20, transformation.trans, sensor))
+                #ICP_dist = args.object_3D.poseDistance(Transformation(transformation), Transformation(transformation_real))
+                #print(dist)
                 dists.append(dist)
+                closest_dists.append(closest_dist)
                 if args.vis:
                     if i == 0:
                         saving_path = args.path_data + '/debug_images/'
@@ -602,8 +624,8 @@ def accuracy(output, target, args, topk=(1,)):
                     plt.savefig(saving_path +'dist={}_{}.png'.format(dist, target[i]) ); 
                     #if dist > 0.01: plt.show()
                     plt.close()
-            return res, dists
-    return res, [1000]*batch_size
+            return res, dists, closest_dists 
+    return res, [1000]*batch_size, [1000]*batch_size
 
 
 if __name__ == '__main__':

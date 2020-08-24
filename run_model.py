@@ -15,44 +15,98 @@ try: from pyquaternion import Quaternion
 except: missing_libs.append('pyquaternion')
 
 
-only_eval = 0
-is_test = 1
-is_real = 1
-is_detectrion2 = 1
-vis = 0
-
-object_name = 'pin_view2'
-sensor_name = 'green_sensor'
-grid_name = 'face1'
-
-desired_checkpoint = 29
-for checkpoint in np.arange(9, 300, 10):
-    if desired_checkpoint is not None:
-        if checkpoint != desired_checkpoint: continue
-    base_command = "python3  train_tactile.py -a resnet50 --lr 0.03 --batch-size 16 --multiprocessing-distributed --world-size 1 --rank 0 "
-    num_epoch = 300
-    base_command += "--epoch {} ".format(num_epoch)
-    localhost = 10001
-    base_command += "--dist-url 'tcp://localhost:{}' ".format(localhost)
-    
-    if checkpoint:
-        base_command += "--resume checkpoint_{}.pth.tar ".format(str(checkpoint).zfill(4))
-    if only_eval:
-        base_command += "--only_eval "
-        if is_test:
-            base_command += "--is_test "
-            if is_real:
-                base_command += "--is_real "
-                if is_detectrion2:
-                    base_command += "--is_detectron2 "
-    base_command += "--object_name {} ".format(object_name)
-    base_command += "--grid_name {} ".format(grid_name)
-    base_command += "--sensor_name {} ".format(sensor_name)
-    if vis:
-        base_command += "--vis "
-    os.system(base_command)
-    path_data = 'data/{}_{}/'.format(object_name, grid_name)
-    #os.system('cp {} {}'.format(path_data + 'errors.npy', path_data + 'errors_change_binary_checkpoint={}_is_test={}_is_real={}.npy'.format(checkpoint,is_test,is_real)))
 
 
+def execute(config):
+    for checkpoint in np.arange(config['start_epoch'], config['num_epoch'], 10):
+        if config['desired_checkpoint'] is not None:
+            if checkpoint != config['desired_checkpoint']: continue
+        base_command = "python3  train_tactile.py -a resnet50 --lr 0.03 --batch-size 16 --multiprocessing-distributed --world-size 1 --rank 0 "
+        
+        base_command += "--epoch {} ".format(config['num_epoch'])
+        
+        base_command += "--dist-url 'tcp://localhost:{}' ".format(config['localhost'])
+        
+        if checkpoint:
+            base_command += "--resume checkpoint_{}.pth.tar ".format(str(checkpoint).zfill(4))
+        if config['only_eval']:
+            
+            base_command += "--only_eval "
+            if config['is_test']:
+                base_command += "--is_test "
+                if config['is_real']:
+                    base_command += "--is_real "
+                    if config['is_detectrion2']:
+                        base_command += "--is_detectron2 "
+        base_command += "--object_name {} ".format(config['object_name'])
+        base_command += "--grid_name {} ".format(config['grid_name'])
+        base_command += "--sensor_name {} ".format(config['sensor_name'])
+        base_command += "--model_dir {} ".format(config['model_dir'])
+        if 'binary' in config['model_dir']:
+            base_command += "--is_binary "
+        if 'pose' in config['model_dir']:
+            base_command += "--input_pose "
+        
+        
+        if config['vis']:
+            base_command += "--vis "
+        os.system(base_command)
+        
 
+config = {}
+config['only_eval'] = 0
+config['is_test'] = 1
+config['is_real'] = 0
+config['is_detectrion2'] = 0
+config['vis'] = 0
+
+config['model_dir'] = '20_aug'
+
+config['object_name'] = 'pin_view2'
+config['object_name'] = 'grease_view1'
+
+config['sensor_name'] = 'green_sensor'
+config['grid_name'] = 'face1'
+config['desired_checkpoint'] = None
+config['num_epoch'] = 200
+config['localhost'] = 10001
+config['start_epoch'] = 0
+
+print('sleeeeping')
+time.sleep(18000)
+#model_dirs = ['basic', 'binary'] #, 'poses', 'binary_poses']
+model_dirs = ['poses', 'binary_poses', 'binary', 'basic']
+#model_dirs = ['binary_poses']
+for model_dir in model_dirs:
+    #for object_name in object_names:
+    config['model_dir'] = model_dir  #+ '_23_aug'
+    # Train
+    if 1:
+        config['only_eval'] = 0
+        config['desired_checkpoint'] = 0
+        print('Train')
+        execute(config)
+    if 1:
+        config['desired_checkpoint'] = None
+        config['only_eval'] = 1
+        config['start_epoch'] = 9
+        if 1:
+            config['is_test'] = 1
+            config['is_real'] = 0
+            print('Eval simulated')
+            execute(config)
+        if 1:
+            config['is_test'] = 1
+            config['is_real'] = 1
+            print('Eval real')
+            execute(config)
+        if 0:
+            config['is_test'] = 0
+            config['is_real'] = 0
+            print('Eval grid')
+            execute(config)
+    if 1:
+         from plots.plot_over_epoch import plot_violin
+         plot_violin(config['object_name'], config['grid_name'], config['model_dir'])
+         
+            
