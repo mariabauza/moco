@@ -126,14 +126,18 @@ parser.add_argument('--model_dir', default='', type=str,
                     help='folder save checkpoints')                                        
 
 
-sys.path.append('/home/mcube/tactile_localization/')
+main_path = os.environ['HOME']
+sys.path.append(main_path + 'tactile_localization/')
 with_tactile=parser.parse_args().only_eval
+
 if with_tactile: 
     from tactile_localization.constants import constants
     from tactile_localization.classes.grid import Grid2D, Grid3D
     from tactile_localization.classes.object_manipulator import Object3D
     from tactile_localization.classes.local_shape import LocalShape, Transformation
+
 import importlib
+
 
 def main():
     args = parser.parse_args()
@@ -297,7 +301,7 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         train_sampler = None
         cal_sampler = None
-    
+
     train_loader = torch.utils.data.DataLoader(
         dataset=train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
             num_workers=args.workers,
@@ -344,7 +348,6 @@ def main_worker(gpu, ngpus_per_node, args):
     dists, closest_dists = evaluate(val_loader, model, criterion, path_data, args)
     case_name = 'checkpoint={}_is_test={}_is_real={}_is_detectron2={}'.format(args.resume[:-8].split('_')[-1], args.is_test, args.is_real, args.is_detectron2)
     np.save(path_data + '/models/' + args.model_dir + '/errors_{}.npy'.format(case_name), dists)
-    print('Median and mean:', np.median(dists), np.mean(dists), 'Closests Median and mean:', np.median(closest_dists), np.mean(closest_dists))
     np.save(path_data + '/models/' + args.model_dir + '/closest_errors_{}.npy'.format(case_name), closest_dists)    
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
@@ -424,7 +427,6 @@ def evaluate(train_loader, model, criterion, path_data, args):
     end = time.time()
     dists_all = []
     closest_dists_all = []
-    
     for i, images in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -466,17 +468,14 @@ def update_queue(train_loader, model, args):
     model.register_buffer("queue", torch.randn(args.moco_dim, args.moco_k))
     model.queue = nn.functional.normalize(model.queue, dim=0).cuda()
     for i, images in enumerate(train_loader):
-        
         if args.gpu is not None:
             #images[0] = images[0].cuda(args.gpu, non_blocking=True)
             images[1] = images[1].cuda(args.gpu, non_blocking=True)
             indexes = images[2]
         keys = model(images[1])
         keys = nn.functional.normalize(keys, dim=1)
-        
         keys = moco.builder.concat_all_gather(keys)
         model.queue[:, indexes] = keys.T
-
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -576,9 +575,9 @@ def accuracy(output, target, args, topk=(1,)):
             list_images.sort(key=os.path.getmtime)
             if args.is_test:
                 if args.is_real:
-                    list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_LS*png'.format(args.object_name))
+                    list_images2 = glob.glob(main_path + 'tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_LS*png'.format(args.object_name))
                 else:
-                    list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*png'.format(args.object_name))
+                    list_images2 = glob.glob(main_path + 'tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*png'.format(args.object_name))
                 list_images2.sort(key=os.path.getmtime)
             else:
                 list_images2 = list_images
@@ -611,7 +610,7 @@ def accuracy(output, target, args, topk=(1,)):
                         os.makedirs(saving_path, exist_ok = True)
                     if args.is_test and args.is_detectron2:
                         mask_num = path_query.replace('.png', '').split('_')[-1]
-                        path_query = '/home/mcube/claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(args.object_name, args.object_name, mask_num)
+                        path_query = main_path + 'claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(args.object_name, args.object_name, mask_num)
                     query = cv2.resize(cv2.imread(path_query), (235,235))
                     query = (query>250).astype('uint8')*255.0
                     prediction = cv2.imread(path_pred)
