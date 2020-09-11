@@ -55,6 +55,7 @@ def generate_noisy_sample(path):
     return
 
 if __name__ == "__main__":
+    last_path = None
     while True:
         list_files = glob.glob('/home/mcube/moco/tmp_data/*{}*.npy'.format(object_name))
         list_files.sort(key=os.path.getmtime)
@@ -66,6 +67,9 @@ if __name__ == "__main__":
                 except:
                     print(list_files[0])
         else: continue
-        
+        if last_path == path:
+            continue        
+            
         generate_noisy_sample(path)
         os.system('rm {}'.format(list_files[0]))
+        last_path = np.copy(path)

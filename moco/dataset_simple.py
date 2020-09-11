@@ -89,10 +89,14 @@ class Dataset(torch.utils.data.Dataset):
                     max_val = np.amin(ls2) + np.random.randint(int(51/5),51)
                     ls2 = (ls2>max_val).astype(np.float32)*255.0
             except:
-                print('No ls2', item)
+                #print('No ls2', item)
                 pass
-        if not self.is_test and len(glob.glob(self.tmp_data_path + '*{}*.npy'.format(self.object_name) )) < self.len:
-            np.save(self.tmp_data_path + '{}_{}_{}.npy'.format(self.object_name, it, time.time()),[item])
+            #print(len(glob.glob(self.tmp_data_path + '*{}*.npy'.format(self.object_name) )))
+            #print(self.is_test, self.len)
+            if not self.is_test and len(glob.glob(self.tmp_data_path + '*{}*.npy'.format(self.object_name) )) < self.len:
+                #print(self.tmp_data_path + '{}_{}_{}.npy'.format(self.object_name, it, time.time()))
+                np.save(self.tmp_data_path + '{}_{}_{}.npy'.format(self.object_name, it, time.time()),[item])
+                #print(np.load(self.tmp_data_path + '{}_{}_{}.npy'.format(self.object_name, it, time.time())))
         
         
         if self.is_binary:

@@ -193,14 +193,15 @@ def main_worker(gpu, ngpus_per_node, args):
     os.makedirs(path_data + '/models/', exist_ok = True)
     os.makedirs(path_data + '/models/' + args.model_dir, exist_ok = True)
     
-    
+    import subprocess
+    if not args.only_eval:
+        subprocess.Popen(["python3", "moco/generate_data.py"])
     train_dataset = moco.dataset_simple.Dataset(args, is_train = True)
     val_dataset = moco.dataset_simple.Dataset(args)
     args.moco_k = train_dataset.len
     print('Got dataset, val is_test', args.is_test, 'is_real', args.is_real)    
-    import subprocess
-    if not args.only_eval:
-        subprocess.Popen(["python3", "moco/generate_data.py"])
+    
+    
     #####################################################################
     #####################################################################
     #####################################################################
