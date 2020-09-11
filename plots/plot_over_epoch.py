@@ -40,7 +40,7 @@ def plot_violin(object_name, grid_name, model_dir):
       ICP1 = errors[4] 
       best10 = errors[2] 
       ICP10 = errors[17]
-      path_data = '/home/mcube/moco/data/{}_{}/models/{}/'.format(object_name, grid_name,model_dir)
+      path_data = 'data/{}_{}/models/{}/'.format(object_name, grid_name,model_dir)
       
       ICP1 = np.load(path_data +'errors_checkpoint={}_is_test=True_is_real=True_is_detectron2=False.npy'.format(str(j).zfill(4))).flatten()*1000
       ICP10 = np.load(path_data +'errors_checkpoint={}_is_test=True_is_real=False_is_detectron2=False.npy'.format(str(j).zfill(4))).flatten()*1000

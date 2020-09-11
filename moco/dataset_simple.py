@@ -11,45 +11,53 @@ import time
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, args,is_train = False):
         super().__init__()
-        
+
         self.object_name = args.object_name
         self.data_path = 'data/{}_{}/train/'.format(self.object_name,args.grid_name)
-        
         self.is_test=args.is_test
         if is_train: self.is_test = False
         self.is_real=args.is_real
         self.is_detectron2=args.is_detectron2
         self.input_pose = args.input_pose
         self.is_binary = args.is_binary
+        self.only_eval = args.only_eval
         if self.is_test:
             print('Loading paper data')
             if self.is_real:
-                self.list_images = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_LS*png'.format(self.object_name))
+                self.list_images = glob.glob('../tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_LS*png'.format(self.object_name))
             else:
-                self.list_images = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_true_LS*png'.format(self.object_name))
+                self.list_images = glob.glob('../tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_true_LS*png'.format(self.object_name))
         else:
             self.list_images = glob.glob(self.data_path + '*/0.png')
         self.list_images.sort(key=os.path.getmtime)
         np.save('moco/object_name.npy',self.object_name)
         np.save('moco/grid_name.npy',args.grid_name)
         np.save('moco/sensor_name.npy',args.sensor_name)
-        self.tmp_data_path = '/home/mcube/moco/tmp_data/'
+        self.tmp_data_path = 'tmp_data/'
         tmp_data = self.tmp_data_path + '*{}*.npy'.format(self.object_name)
         if len(glob.glob(tmp_data)):
             os.system('rm ' + tmp_data)
         print('Done dataset init')
         self.len = len(self.list_images)
-    
-        
+
+        self.size1 = 200
+        self.size2 = 200
+
+        if self.input_pose:
+            ls1 = cv2.imread(self.list_images[0])
+            xv, yv = np.meshgrid(np.arange(self.size1)-(self.size1-1)/2.0, np.arange(self.size2)-(self.size2-1)/2.0, sparse=False, indexing='ij')
+            self.xv = (xv - np.mean(xv))/np.std(xv)
+            self.yv = (yv - np.mean(yv))/np.std(yv)
+
         self.mean_path = self.data_path + '../models/' + args.model_dir + '/mean.npy'
         if not os.path.exists(self.mean_path):
             self.compute_normalization()
         self.mean = np.load(self.mean_path).astype(np.float32)
         self.std = np.load(self.mean_path.replace('mean','std')).astype(np.float32)
-    
+
     def compute_normalization(self):
         images = []
-        
+
         self.std = np.ones(3)
         self.mean = np.zeros(3)
         print('Computing normalization')
@@ -72,12 +80,11 @@ class Dataset(torch.utils.data.Dataset):
         '''
     
     def __getitem__(self, it):
-        
         item = self.list_images[it]
         if self.is_test and self.is_detectron2:
             mask_num = item.replace('.png', '').split('_')[-1]
-            item = '/home/mcube/claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(self.object_name, self.object_name, mask_num)
-        ls1 = cv2.resize(cv2.imread(item), (200,200) ).astype(np.float32) 
+            item = '../claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(self.object_name, self.object_name, mask_num)
+        ls1 = cv2.resize(cv2.imread(item), (self.size2,self.size1) ).astype(np.float32) 
         ls1 = (ls1>250).astype(np.float32)*255.0
         ls2 = None
         while ls2 is None:
@@ -85,20 +92,15 @@ class Dataset(torch.utils.data.Dataset):
                 if self.is_test:  #NO given LS for testing with real data
                     ls2 = np.copy(ls1)
                 else:
-                    ls2 = cv2.resize(cv2.imread(item.replace('0.png','1.png')), (200,200) ).astype(np.float32)
+                    ls2 = cv2.resize(cv2.imread(item.replace('0.png','1.png')), (self.size2,self.size1) ).astype(np.float32)
                     max_val = np.amin(ls2) + np.random.randint(int(51/5),51)
                     ls2 = (ls2>max_val).astype(np.float32)*255.0
             except:
                 #print('No ls2', item)
                 pass
-            #print(len(glob.glob(self.tmp_data_path + '*{}*.npy'.format(self.object_name) )))
-            #print(self.is_test, self.len)
-            if not self.is_test and len(glob.glob(self.tmp_data_path + '*{}*.npy'.format(self.object_name) )) < self.len:
-                #print(self.tmp_data_path + '{}_{}_{}.npy'.format(self.object_name, it, time.time()))
+
+            if not self.only_eval and len(glob.glob(self.tmp_data_path + '*{}*.npy'.format(self.object_name) )) < self.len:
                 np.save(self.tmp_data_path + '{}_{}_{}.npy'.format(self.object_name, it, time.time()),[item])
-                #print(np.load(self.tmp_data_path + '{}_{}_{}.npy'.format(self.object_name, it, time.time())))
-        
-        
         if self.is_binary:
             ls1 = np.amax(ls1) - ls1
             ls2 = np.amax(ls2) - ls2
@@ -108,15 +110,12 @@ class Dataset(torch.utils.data.Dataset):
         
         if self.input_pose:
         
-            xv, yv = np.meshgrid(np.arange(ls1.shape[1])-(ls1.shape[1]-1)/2.0, np.arange(ls1.shape[2])-(ls1.shape[2]-1)/2.0, sparse=False, indexing='ij')
-
-            xv = (xv - np.mean(xv))/np.std(xv)
-            yv = (yv - np.mean(yv))/np.std(yv)
-            ls1[1,:,:] = xv
-            ls1[2,:,:] = yv
+            ls1[1,:,:] = self.xv
+            ls1[2,:,:] = self.yv
             
-            ls2[1,:,:] = xv
-            ls2[2,:,:] = yv
+            ls2[1,:,:] = self.xv
+            ls2[2,:,:] = self.yv
+
             for i in range(1):
                 ls2[i] = (ls2[i]-self.mean[i])/self.std[i]
                 ls1[i] = (ls1[i]-self.mean[i])/self.std[i]
@@ -125,8 +124,6 @@ class Dataset(torch.utils.data.Dataset):
             for i in range(len(self.std)):
                 ls2[i] = (ls2[i]-self.mean[i])/self.std[i]
                 ls1[i] = (ls1[i]-self.mean[i])/self.std[i]
-        
-        
         return (torch.from_numpy(ls2), torch.from_numpy(ls1), it)  #Flipped, noisy image should be query
 
     def __len__(self):
