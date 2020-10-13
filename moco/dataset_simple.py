@@ -13,13 +13,16 @@ class Dataset(torch.utils.data.Dataset):
         super().__init__()
 
         self.object_name = args.object_name
-        self.data_path = 'data/{}_{}/train/'.format(self.object_name,args.grid_name)
+        self.data_path = 'data/{}_{}/'.format(self.object_name,args.grid_name)
+        
+        #
         self.is_test=args.is_test
         if is_train: self.is_test = False
         self.is_real=args.is_real
         self.is_detectron2=args.is_detectron2
         self.input_pose = args.input_pose
         self.is_binary = args.is_binary
+        self.is_vision = args.is_vision
         self.only_eval = args.only_eval
         if self.is_test:
             print('Loading paper data')
@@ -28,11 +31,29 @@ class Dataset(torch.utils.data.Dataset):
             else:
                 self.list_images = glob.glob('../tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_true_LS*png'.format(self.object_name))
         else:
-            self.list_images = glob.glob(self.data_path + '*/0.png')
+            data_path = os.environ['HOME'] + '/tactile_localization/data_tactile_localization/{}/{}/grids/{}/'.format(args.sensor_name, self.object_name,args.grid_name)
+            self.list_images = glob.glob(data_path + 'local_shape_*1.png')
+            if self.is_vision:
+                aux_list = []
+                for it in self.list_images:
+                    if os.path.exists(it.replace('0.png','obj_depth_0.png')):
+                        aux_list.append(it)
+                self.list_images = aux_list
+        print('Length dataset', self.data_path, len(self.list_images))
         self.list_images.sort(key=os.path.getmtime)
+        self.list_trans = []
+        for path in self.list_images:
+            trans_path = path.replace('.png','.npy').replace('true_','').replace('LS','trans').replace('local_shape','transformation')
+            if os.path.exists(trans_path):
+                self.list_trans.append(trans_path)
+            else:
+                print('Doesnt exist:', trans_path)
+                assert(False)
         np.save('moco/object_name.npy',self.object_name)
         np.save('moco/grid_name.npy',args.grid_name)
         np.save('moco/sensor_name.npy',args.sensor_name)
+        np.save('moco/is_vision.npy',args.is_vision)
+        np.save('moco/change_gripper.npy',args.change_gripper)
         self.tmp_data_path = 'tmp_data/'
         tmp_data = self.tmp_data_path + '*{}*.npy'.format(self.object_name)
         if len(glob.glob(tmp_data)):
@@ -44,12 +65,11 @@ class Dataset(torch.utils.data.Dataset):
         self.size2 = 200
 
         if self.input_pose:
-            ls1 = cv2.imread(self.list_images[0])
             xv, yv = np.meshgrid(np.arange(self.size1)-(self.size1-1)/2.0, np.arange(self.size2)-(self.size2-1)/2.0, sparse=False, indexing='ij')
             self.xv = (xv - np.mean(xv))/np.std(xv)
             self.yv = (yv - np.mean(yv))/np.std(yv)
 
-        self.mean_path = self.data_path + '../models/' + args.model_dir + '/mean.npy'
+        self.mean_path = self.data_path + 'models/' + args.model_dir + '/mean.npy'
         if not os.path.exists(self.mean_path):
             self.compute_normalization()
         self.mean = np.load(self.mean_path).astype(np.float32)
@@ -60,7 +80,7 @@ class Dataset(torch.utils.data.Dataset):
 
         self.std = np.ones(3)
         self.mean = np.zeros(3)
-        print('Computing normalization')
+        print('Computing normalization of # img: ', self.__len__())
         for it in range(self.__len__()):
             if it%1000 == 0: print(it)
             _, ls, _  = self.__getitem__(it)
@@ -86,15 +106,26 @@ class Dataset(torch.utils.data.Dataset):
             item = '../claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(self.object_name, self.object_name, mask_num)
         ls1 = cv2.resize(cv2.imread(item), (self.size2,self.size1) ).astype(np.float32) 
         ls1 = (ls1>250).astype(np.float32)*255.0
+        if self.is_vision:
+            img_item = item.replace('0.png','obj_depth_0.png')
+            img = cv2.imread(img_item)
+            try:
+                img.shape
+            except:
+                print('Fallaaaaaaaaaaaa:', img_item)
+                return
+            depth1 = cv2.resize(img, (self.size2,self.size1) ).astype(np.float32) 
         ls2 = None
         while ls2 is None:
             try:
                 if self.is_test:  #NO given LS for testing with real data
                     ls2 = np.copy(ls1)
                 else:
-                    ls2 = cv2.resize(cv2.imread(item.replace('0.png','1.png')), (self.size2,self.size1) ).astype(np.float32)
+                    ls2 = cv2.resize(cv2.imread(item.replace('0.png','4.png')), (self.size2,self.size1) ).astype(np.float32)                
                     max_val = np.amin(ls2) + np.random.randint(int(51/5),51)
                     ls2 = (ls2>max_val).astype(np.float32)*255.0
+                    if self.is_vision: # Add some sort of data aug
+                        depth2 = cv2.resize(cv2.imread(img_item.replace('0.png','4.png')), (self.size2,self.size1) ).astype(np.float32) 
             except:
                 #print('No ls2', item)
                 pass
@@ -104,18 +135,25 @@ class Dataset(torch.utils.data.Dataset):
         if self.is_binary:
             ls1 = np.amax(ls1) - ls1
             ls2 = np.amax(ls2) - ls2
+        if self.is_vision == 1:            
+            ls1 = np.copy(depth1)
+            ls2 = np.copy(depth2)
+        if self.is_vision == 2:            
+            ls1[:,:,1] = np.copy(depth1[:,:,0])
+            ls2[:,:,1] = np.copy(depth2[:,:,0])
+        
         ls1 = ls1.swapaxes(0,2).swapaxes(1,2)
         ls2 = ls2.swapaxes(0,2).swapaxes(1,2)
         
         
         if self.input_pose:
-        
-            ls1[1,:,:] = self.xv
-            ls1[2,:,:] = self.yv
             
-            ls2[1,:,:] = self.xv
+            if self.is_vision != 2:            
+                ls1[1,:,:] = self.xv
+                ls2[1,:,:] = self.xv
+            ls1[2,:,:] = self.yv
             ls2[2,:,:] = self.yv
-
+            #Normalize only first channel
             for i in range(1):
                 ls2[i] = (ls2[i]-self.mean[i])/self.std[i]
                 ls1[i] = (ls1[i]-self.mean[i])/self.std[i]

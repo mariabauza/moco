@@ -9,6 +9,23 @@ import shutil
 import time
 import warnings
 import copy
+import sys, pdb
+
+
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that may be used
+    from a forked multiprocessing child
+
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+
+
 
 import torch
 import torch.nn as nn
@@ -29,6 +46,7 @@ import moco.dataset_simple
 
 import matplotlib.pyplot as plt
 import sys
+
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -121,12 +139,16 @@ parser.add_argument('--vis', default='', type=str,
 parser.add_argument('--input_pose', action='store_true',
                     help='if paper or grdi data')                                      
 parser.add_argument('--is_binary', action='store_true',
-                    help='if paper or grdi data')                                        
+                    help='if paper or grdi data')                                                                            
+parser.add_argument('--is_vision', default=0, type=int, metavar='N',
+                    help='if train using camera depth images')                           
+parser.add_argument('--change_gripper', action='store_true',
+                    help='change x,y,z pose gripper')    
 parser.add_argument('--model_dir', default='', type=str, 
                     help='folder save checkpoints')                                        
 
 
-main_path = os.environ['HOME']
+main_path = os.environ['HOME'] + '/'
 sys.path.append(main_path + 'tactile_localization/')
 with_tactile=parser.parse_args().only_eval
 
@@ -137,7 +159,6 @@ if with_tactile:
     from tactile_localization.classes.local_shape import LocalShape, Transformation
 
 import importlib
-
 
 def main():
     args = parser.parse_args()
@@ -162,6 +183,8 @@ def main():
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
 
     ngpus_per_node = torch.cuda.device_count()
+    args.model_dir += '/'
+    print('model dir:', args.model_dir)
     if args.multiprocessing_distributed:
         # Since we have ngpus_per_node processes per node, the total world_size
         # needs to be adjusted accordingly
@@ -172,7 +195,7 @@ def main():
     else:
         # Simply call main_worker function
         main_worker(args.gpu, ngpus_per_node, args)
-    args.model_dir += '/'
+    
 
 dists = []
 def main_worker(gpu, ngpus_per_node, args):
@@ -193,7 +216,7 @@ def main_worker(gpu, ngpus_per_node, args):
     path_data = 'data/{}_{}'.format(object_name, grid_name)
     
     args.path_data = path_data
-    
+    print('Path data', path_data)
     os.makedirs(path_data + '/models/', exist_ok = True)
     os.makedirs(path_data + '/models/' + args.model_dir, exist_ok = True)
     
@@ -202,10 +225,17 @@ def main_worker(gpu, ngpus_per_node, args):
         subprocess.Popen(["python3", "moco/generate_data.py"])
     train_dataset = moco.dataset_simple.Dataset(args, is_train = True)
     val_dataset = moco.dataset_simple.Dataset(args)
-    args.moco_k = train_dataset.len
-    print('Got dataset, val is_test', args.is_test, 'is_real', args.is_real)    
+    args.moco_k = train_dataset.len                     #TODO: TO BE UPDATED
+    print('Got dataset, val is_test', args.is_test, 'is_real', args.is_real, 'is_vision', args.is_vision)    
     
     
+    ## Create other:
+    args2 = parser.parse_args()
+    args2.is_test = True; 
+    args2.is_real = True
+    real_dataset = moco.dataset_simple.Dataset(args2)
+    args2.is_real = False
+    true_dataset = moco.dataset_simple.Dataset(args2)
     #####################################################################
     #####################################################################
     #####################################################################
@@ -286,6 +316,9 @@ def main_worker(gpu, ngpus_per_node, args):
                 # Map model to be loaded to specified single gpu.
                 loc = 'cuda:{}'.format(args.gpu)
                 checkpoint = torch.load(args.resume, map_location=loc)
+                
+            if 'queue_aux' in checkpoint['state_dict'].keys():
+                del checkpoint['state_dict']['queue_aux']
             args.start_epoch = checkpoint['epoch']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
@@ -299,6 +332,8 @@ def main_worker(gpu, ngpus_per_node, args):
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
         val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
+        real_sampler = torch.utils.data.distributed.DistributedSampler(real_dataset)
+        true_sampler = torch.utils.data.distributed.DistributedSampler(true_dataset)
     else:
         train_sampler = None
         cal_sampler = None
@@ -312,20 +347,31 @@ def main_worker(gpu, ngpus_per_node, args):
         dataset=val_dataset, batch_size=args.batch_size, shuffle=(val_sampler is None),
             num_workers=args.workers,
             pin_memory=True, sampler=val_sampler, drop_last=True)
+    
+    real_loader = torch.utils.data.DataLoader(
+        dataset=real_dataset, batch_size=args.batch_size, shuffle=(real_sampler is None),
+            num_workers=args.workers,
+            pin_memory=True, sampler=real_sampler, drop_last=True)
+    
+    true_loader = torch.utils.data.DataLoader(
+        dataset=true_dataset, batch_size=args.batch_size, shuffle=(true_sampler is None),
+            num_workers=args.workers,
+            pin_memory=True, sampler=true_sampler, drop_last=True)
 
     if not args.only_eval:
         best_dist = 1
         for epoch in range(args.start_epoch, args.epochs):
-            init = time.time()
-            
+            init = time.time()       
             if args.distributed:
                 train_sampler.set_epoch(epoch)
                 print('Epoch', epoch, 'set')
             adjust_learning_rate(optimizer, epoch, args)
-            
             # train for one epoch
-            dists = train(train_loader, model, criterion, optimizer, epoch, args)
-            print('Epoch: ', epoch, np.median(dists), np.mean(dists))
+            acc1, acc5, paths_pred, paths_target = train(train_loader, model, criterion, optimizer, epoch, args)
+            print('Epoch: ', epoch, 'path_data', path_data)
+            
+            np.save(path_data + '/models/' + args.model_dir +'acc1_epoch={}_{}.npy'.format(epoch, acc1.cpu().numpy()), acc1.cpu().numpy())
+            np.save(path_data + '/models/' + args.model_dir +'acc5_epoch={}_{}.npy'.format(epoch, acc5.cpu().numpy()), acc5.cpu().numpy())
             
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                     and args.rank % ngpus_per_node == 0):
@@ -340,16 +386,64 @@ def main_worker(gpu, ngpus_per_node, args):
                         'arch': args.arch,
                         'state_dict': model.state_dict(),
                         'optimizer' : optimizer.state_dict(),
-                    }, is_best=save_best, filename= path_data + '/models/{}/checkpoint_{:04d}.pth.tar'.format(args.model_dir, epoch))
+                    }, is_best=save_best, filename= path_data + '/models/{}/13_oct_checkpoint_{:04d}.pth.tar'.format(args.model_dir, epoch))
                         # train for one epoch
             print('Time: ', time.time()-init)
-    
+            if (epoch +1) % 5 == 0:
+                
+                print('Testing without new queue')
+                paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args, use_current_queue = True)         
+                save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data)
+                print(time.time() - init, 'done eval for TRUE')
+                os.system('python3 moco/test_matches.py -n {}'.format(epoch)) 
+                
+                paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True)
+                save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data)
+                print(time.time() - init, 'done eval for REAL')
+                os.system('python3 moco/test_matches.py -n {}'.format(epoch)) 
+                
+                
+                print('Updating queue')
+                update_queue(train_loader, model, args)
+                print(time.time() - init, 'done queue')
+                
+                paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args)         
+                save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data)
+                print(time.time() - init, 'done eval for TRUE')
+                os.system('python3 moco/test_matches.py -n {}'.format(epoch)) 
+                
+                paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args)
+                save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data)
+                print(time.time() - init, 'done eval for REAL')
+                os.system('python3 moco/test_matches.py -n {}'.format(epoch))                 
+                
+                
+    print('Updating queue')
     update_queue(train_loader, model, args)
     # train for one epoch
-    dists, closest_dists = evaluate(val_loader, model, criterion, path_data, args)
-    case_name = 'checkpoint={}_is_test={}_is_real={}_is_detectron2={}'.format(args.resume[:-8].split('_')[-1], args.is_test, args.is_real, args.is_detectron2)
-    np.save(path_data + '/models/' + args.model_dir + '/errors_{}.npy'.format(case_name), dists)
-    np.save(path_data + '/models/' + args.model_dir + '/closest_errors_{}.npy'.format(case_name), closest_dists)    
+    #dists, closest_dists = evaluate(val_loader, model, criterion, path_data, args)
+    print('Evaluating loader')
+    paths_pred, paths_target = evaluate(val_loader, model, criterion, path_data, args)
+    save_paths(paths_pred, paths_target, train_dataset, val_dataset, args.start_epoch, path_data)
+    os.system('python3 moco/test_matches.py -n {}'.format(args.start_epoch) ) 
+
+def save_paths(paths_pred, paths_target, train_dataset,val_dataset, epoch, path_data):
+    matches_path = path_data + '/matches_{}/'.format(epoch)
+    os.makedirs(matches_path, exist_ok=True)
+    for it_p, ind in enumerate(paths_target):
+
+        path = val_dataset.list_trans[ind]
+        path_save = matches_path + 'predicted' + path.replace('transformation', 'matches_moco={}'.format(epoch)).replace('trans','matches_moco={}'.format(epoch)).split('predicted')[-1]
+        list_pred = []
+        list_LS_pred = []
+        for i in paths_pred[it_p]:
+            list_pred.append(train_dataset.list_trans[i])
+            list_LS_pred.append(train_dataset.list_images[i])
+        np.save(path_save, list_pred)
+        np.save(path_save.replace('predicted_matches', 'predicted_LS_matches'), list_LS_pred)
+    #case_name = 'checkpoint={}_is_test={}_is_real={}_is_detectron2={}'.format(args.resume[:-8].split('_')[-1], args.is_test, args.is_real, args.is_detectron2)
+    #np.save(path_data + '/models/' + args.model_dir + '/errors_{}.npy'.format(case_name), dists)
+    #np.save(path_data + '/models/' + args.model_dir + '/closest_errors_{}.npy'.format(case_name), closest_dists)    
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
     batch_time = AverageMeter('Time', ':6.3f')
@@ -367,7 +461,8 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     end = time.time()
     dists_all = []
     closest_dists_all = []
-    
+    paths_pred =[]
+    paths_target =[]
     for i, images in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -384,7 +479,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         loss = criterion(output, target)
         # acc1/acc5 are (K+1)-way contrast classifier accuracy
         # measure accuracy and record loss
-        res, dists, closest_dists = accuracy(output, target, args, topk=(1, 5))
+        res,  path_pred, path_target = accuracy(output, target, args, topk=(1, 5), do_match= False)
         acc1, acc5 = res
         losses.update(loss.item(), images[0].size(0))
         top1.update(acc1[0], images[0].size(0))
@@ -399,53 +494,61 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
+        if i % (args.print_freq*10) == 0:
             progress.display(i)
+        
+        if len(paths_pred):
+            paths_pred += path_pred
+            paths_target += path_target
+        else:
+            paths_pred = np.copy(path_pred).tolist()
+            paths_target = np.copy(path_target).tolist()
+        
     progress.display(len(train_loader)-1)
-    dists_all.append(dists)
-    closest_dists_all.append(dists)
-    return dists_all, closest_dists_all
+    
+    return acc1, acc5, paths_pred, paths_target
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')
 
-def evaluate(train_loader, model, criterion, path_data, args):
-    batch_time = AverageMeter('Time', ':6.3f')
-    data_time = AverageMeter('Data', ':6.3f')
-    losses = AverageMeter('Loss', ':.4e')
-    top1 = AverageMeter('Acc@1', ':6.2f')
-    top5 = AverageMeter('Acc@5', ':6.2f')
+def evaluate(val_loader, model, criterion, path_data, args, use_current_queue = False):
+    batch_time = AverageMeter('Time', ':6.3f'); data_time = AverageMeter('Data', ':6.3f'); losses = AverageMeter('Loss', ':.4e')
+    top1 = AverageMeter('Acc@1', ':6.2f'); top5 = AverageMeter('Acc@5', ':6.2f')
     epoch = 0
-    progress = ProgressMeter(
-        len(train_loader),
-        [batch_time, data_time, losses, top1, top5],
-        prefix="Epoch: [{}]".format(epoch))
+    progress = ProgressMeter(len(val_loader),[batch_time, data_time, losses, top1, top5],prefix="Epoch: [{}]".format(epoch))
 
-    
     model.eval()
     end = time.time()
-    dists_all = []
-    closest_dists_all = []
-    for i, images in enumerate(train_loader):
+    dists_all = []; closest_dists_all = []
+    paths_pred = []; paths_target = []
+    for i, images in enumerate(val_loader):
+        
         # measure data loading time
         data_time.update(time.time() - end)
         if args.gpu is not None:
             images[0] = images[0].cuda(args.gpu, non_blocking=True)
             images[1] = images[1].cuda(args.gpu, non_blocking=True)
             indexes = images[2]
-        # compute output
-        queries = model(images[0])
-        queries = nn.functional.normalize(queries, dim=1)
         
-        output = torch.einsum('nc,ck->nk', [queries, model.queue.clone().detach()])
+        # compute output
+        if use_current_queue:
+            output = model(images[0], only_eval = True)
+            
+        else:
+            queries = model(images[0])
+            
+            #queries = nn.functional.normalize(queries, dim=1)
+            output = torch.einsum('nc,ck->nk', [queries, model.queue_aux.clone().detach()])
         target = indexes.cuda()
         loss = criterion(output, target)
+        
         # acc1/acc5 are (K+1)-way contrast classifier accuracy
         # measure accuracy and record loss
-        res, dists, closest_dists = accuracy(output, target, args, topk=(1, 5))
-        print(np.median(dists), np.mean(dists), 'closests:', np.median(closest_dists), np.mean(closest_dists))
+        #res, dists, closest_dists = accuracy(output, target, args, topk=(1, 5))
+        res, path_pred, path_target = accuracy(output, target, args, topk=(1, 5), do_match= True)
+        #print(len(path_pred), path_target)
         acc1, acc5 = res
         losses.update(loss.item(), images[0].size(0))
         top1.update(acc1[0], images[0].size(0))
@@ -457,17 +560,29 @@ def evaluate(train_loader, model, criterion, path_data, args):
 
         if i % args.print_freq == 0:
             progress.display(i)
+        if len(paths_pred):
+            paths_pred += path_pred
+            paths_target += path_target
+        else:
+            paths_pred = np.copy(path_pred).tolist()
+            paths_target = np.copy(path_target).tolist()
+        
+    return paths_pred, paths_target
+    '''
         dists_all.append(dists)
         closest_dists_all.append(closest_dists)
-        print('Median and mean so far:', np.median(dists_all), np.mean(dists_all))
+        if i % 1000 == 0: 
+            print('Median and mean so far:', np.median(dists_all), np.mean(dists_all))
     return dists_all, closest_dists_all
-
+    '''
+    
+    
 def update_queue(train_loader, model, args):
     
     model.eval()
     #print(model.named_modules)
-    model.register_buffer("queue", torch.randn(args.moco_dim, args.moco_k))
-    model.queue = nn.functional.normalize(model.queue, dim=0).cuda()
+    model.register_buffer("queue_aux", torch.randn(args.moco_dim, args.moco_k))
+    model.queue_aux = nn.functional.normalize(model.queue_aux, dim=0).cuda()
     for i, images in enumerate(train_loader):
         if args.gpu is not None:
             #images[0] = images[0].cuda(args.gpu, non_blocking=True)
@@ -476,7 +591,7 @@ def update_queue(train_loader, model, args):
         keys = model(images[1])
         keys = nn.functional.normalize(keys, dim=1)
         keys = moco.builder.concat_all_gather(keys)
-        model.queue[:, indexes] = keys.T
+        model.queue_aux[:, indexes] = keys.T
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -552,15 +667,12 @@ def accuracy2(output, target, topk=(1,)):
 import glob
 import cv2
 import numpy as np
-def accuracy(output, target, args, topk=(1,)):
+def accuracy(output, target, args, topk=(1,), do_match = False):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():
         maxk = max(topk)
         batch_size = target.size(0)
-
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        
+        _, pred = output.topk(50, 1, True, True); pred = pred.t()
         correct = pred.eq(target.view(1, -1).expand_as(pred))
 
         res = []
@@ -568,12 +680,19 @@ def accuracy(output, target, args, topk=(1,)):
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         
-        if  with_tactile:
+        if  do_match:
+            '''
             dists =[]
             closest_dists =[]
             
             list_images = glob.glob(args.path_data + '/train/*/0.png')
             list_images.sort(key=os.path.getmtime)
+            if args.is_vision:
+                aux_list = []
+                for it in list_images:
+                    if os.path.exists(it.replace('0.png','obj_depth_0.png')):
+                        aux_list.append(it)
+                list_images = aux_list
             if args.is_test:
                 if args.is_real:
                     list_images2 = glob.glob(main_path + 'tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_LS*png'.format(args.object_name))
@@ -582,16 +701,26 @@ def accuracy(output, target, args, topk=(1,)):
                 list_images2.sort(key=os.path.getmtime)
             else:
                 list_images2 = list_images
-
+            '''
+            index_pred = []
+            index_target = []
+            for i in range(batch_size):
+                index_pred.append(pred[0:50,i].cpu().numpy())
+                index_target.append(target[i].cpu().numpy())
+            return res, index_pred, index_target
+            '''
             for i in range(batch_size):
                 path_pred = list_images[pred[0,i]]
                 transformation = np.load(path_pred.replace('0.png', 'transformation.npy'))
-                
                 path_query = list_images2[target[i]]
+                
+                if args.is_vision:
+                        path_pred = path_pred.replace('0.png', 'obj_depth_0.png')
                 if not args.is_test:
+                    trans_path = path_query.replace('0.png', 'transformation.npy')
+                    if args.is_vision:
+                        path_query = path_query.replace('0.png', 'obj_depth_0.png')
                     path_query = path_query.replace('0.png', '1.png')
-                    trans_path = path_query.replace('1.png', 'transformation.npy')
-                    
                     transformation_real = np.load(trans_path)
                     closest_dist = args.grid.closestElement(Transformation(transformation_real))
                 else:
@@ -599,7 +728,15 @@ def accuracy(output, target, args, topk=(1,)):
                     transformation_real[2,3] *=-1
                     closest_dist = np.load(path_query.replace('_true', '').replace('ed_LS', 'ed_dist_closest_trans').replace('png', 'npy'))
                 
+                transformation_real = np.load(trans_path)
                 dist = args.object_3D.poseDistance(Transformation(transformation), Transformation(transformation_real))
+                if args.is_vision:
+                    init_face = trans_path.split('/')[-2]
+                    init_face = init_face.split('_')[-2]
+                    faces = glob.glob(trans_path.replace(init_face + '_1/tra', '*_1/tra'))
+                    for face in faces: #TODO: adjust
+                        transformation_real = np.load(face)
+                        dist = np.minimum(dist, args.object_3D.poseDistance(Transformation(transformation), Transformation(transformation_real)))
                 #transformation = Transformation(helper.single_filterreg_run(local_shape.ls, ICP_ls, 20, transformation.trans, sensor))
                 #ICP_dist = args.object_3D.poseDistance(Transformation(transformation), Transformation(transformation_real))
                 #print(dist)
@@ -612,10 +749,13 @@ def accuracy(output, target, args, topk=(1,)):
                     if args.is_test and args.is_detectron2:
                         mask_num = path_query.replace('.png', '').split('_')[-1]
                         path_query = main_path + 'claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(args.object_name, args.object_name, mask_num)
-                    query = cv2.resize(cv2.imread(path_query), (235,235))
-                    query = (query>250).astype('uint8')*255.0
+                    query = cv2.imread(path_query)
+                    if args.is_vision != 1:
+                        query = cv2.resize(query, (235,235))
+                        query = (query>250).astype('uint8')*255.0
                     prediction = cv2.imread(path_pred)
-                    prediction = (prediction>250).astype('uint8')*255.0
+                    if args.is_vision != 1:
+                        prediction = (prediction>250).astype('uint8')*255.0
                     result_img = np.concatenate([query, prediction, np.abs(query-prediction)], axis=1)
                     plt.imshow(np.array(result_img,np.int32)); 
                     plt.savefig(saving_path +'{}_correct={}.png'.format(target[i],correct[0,i]) ); plt.close()
@@ -625,6 +765,7 @@ def accuracy(output, target, args, topk=(1,)):
                     #if dist > 0.01: plt.show()
                     plt.close()
             return res, dists, closest_dists 
+            '''
     return res, [1000]*batch_size, [1000]*batch_size
 
 

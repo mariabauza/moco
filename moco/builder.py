@@ -37,8 +37,9 @@ class MoCo(nn.Module):
 
         # create the queue
         self.register_buffer("queue", torch.randn(dim, K))
+        
         self.queue = nn.functional.normalize(self.queue, dim=0)
-
+        
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
     @torch.no_grad()
@@ -116,7 +117,7 @@ class MoCo(nn.Module):
 
         return x_gather[idx_this]
 
-    def forward(self, im_q, im_k = None, indexes= None):
+    def forward(self, im_q, im_k = None, indexes= None, only_eval = False):
         """
         Input:
             im_q: a batch of query images
@@ -129,8 +130,10 @@ class MoCo(nn.Module):
         q = self.encoder_q(im_q)  # queries: NxC
         q = nn.functional.normalize(q, dim=1)
         
+        if only_eval: 
+            l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
+            return l_neg
         if im_k is None: return q
-        
         # compute key features
         with torch.no_grad():  # no gradient to keys
             self._momentum_update_key_encoder()  # update the key encoder
@@ -147,7 +150,10 @@ class MoCo(nn.Module):
         l_pos = torch.einsum('nc,nc->n', [q, k]).unsqueeze(-1)
         # negative logits: NxK
         l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
-        #l_neg[:,indexes] = -100 # Hack not add to loss
+        
+        
+        # TODOOOOOOOOO
+        l_neg[:,indexes] = -100 # Hack not add to loss
 
         # logits: Nx(1+K)
         logits = torch.cat([l_pos, l_neg], dim=1)
