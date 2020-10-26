@@ -28,9 +28,10 @@ def execute(config):
         base_command += "--dist-url 'tcp://localhost:{}' ".format(config['localhost'])
         
         if checkpoint:
-            base_command += "--resume checkpoint_{}.pth.tar ".format(str(checkpoint).zfill(4))
+            base_command += "--resume 20_oct_checkpoint_{}.pth.tar ".format(str(checkpoint).zfill(4))
+        #base_command += "--resume 20_oct_checkpoint_{}.pth.tar ".format(str(119).zfill(4))
+        base_command += "--resume grease_view1_final_paper.pt ".format(str(checkpoint).zfill(4))
         if config['only_eval']:
-            
             base_command += "--only_eval "
             if config['is_test']:
                 base_command += "--is_test "
@@ -46,67 +47,84 @@ def execute(config):
             base_command += "--is_binary "
         if 'pose' in config['model_dir']:
             base_command += "--input_pose "
-        
-        
+        if config['is_vision']:
+            base_command += "--is_vision {}".format(config['is_vision'])
         if config['vis']:
             base_command += "--vis "
+        print(base_command)
         os.system(base_command)
         
 
 config = {}
 config['only_eval'] = 0
-config['is_test'] = 1
+config['is_test'] = 0
 config['is_real'] = 0
 config['is_detectrion2'] = 0
 config['vis'] = 0
+config['is_vision'] = 0  #0, 1, 2 (tactile_vision)
 
-config['model_dir'] = '20_aug'
 
+config['model_dir'] = '23_oct_paper_'
+
+# Paper
 config['object_name'] = 'pin_view2'
 config['object_name'] = 'grease_view1'
-
 config['sensor_name'] = 'green_sensor'
 config['grid_name'] = 'face1'
+#config['grid_name'] = 'grid_depth_1'
+#config['grid_name'] = 'final'
+
+# Kitting
+#config['object_name'] = 'big_head'
+#config['sensor_name'] = 'kitting_sensor'
+#config['grid_name'] = 'test_vision'
+
+
 config['desired_checkpoint'] = None
-config['num_epoch'] = 200
-config['localhost'] = 10001
+config['num_epoch'] = 190
+config['localhost'] = 10002
 config['start_epoch'] = 0
 
-print('sleeeeping')
-time.sleep(18000)
+#print('sleeeeping')
+#time.sleep(18000)
 #model_dirs = ['basic', 'binary'] #, 'poses', 'binary_poses']
-model_dirs = ['poses', 'binary_poses', 'binary', 'basic']
+#model_dirs = ['poses', 'binary_poses', 'binary', 'basic']
 #model_dirs = ['binary_poses']
+model_dirs = ['poses_4']
+print('Change loss same, depth max smaller')
 for model_dir in model_dirs:
     #for object_name in object_names:
     config['model_dir'] = model_dir  #+ '_23_aug'
     # Train
     if 1:
+        print('Starting epoch 119')
+        config['start_epoch'] = 0
+        config['desired_checkpoint'] = 0 # 0
+        
+        
         config['only_eval'] = 0
         config['desired_checkpoint'] = 0
         print('Train')
         execute(config)
-    if 1:
+    if 0:
         config['desired_checkpoint'] = None
         config['only_eval'] = 1
-        config['start_epoch'] = 9
+        config['start_epoch'] = 119
+        if 0:
+            config['is_test'] = 1
+            config['is_real'] = 1
+            print('Eval real')
+            execute(config)
         if 1:
             config['is_test'] = 1
             config['is_real'] = 0
             print('Eval simulated')
-            execute(config)
-        if 1:
-            config['is_test'] = 1
-            config['is_real'] = 1
-            print('Eval real')
             execute(config)
         if 0:
             config['is_test'] = 0
             config['is_real'] = 0
             print('Eval grid')
             execute(config)
-    if 1:
+    if 0:
          from plots.plot_over_epoch import plot_violin
          plot_violin(config['object_name'], config['grid_name'], config['model_dir'])
-         
-            

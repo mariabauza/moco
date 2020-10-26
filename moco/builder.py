@@ -1,7 +1,28 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import torch
 import torch.nn as nn
+import numpy as np
 
+
+class FrozenBatchNorm2d(nn.Module):
+    """
+    BatchNorm2d where the batch statistics and the affine parameters
+    are fixed
+    """
+
+    def __init__(self, n):
+        super(FrozenBatchNorm2d, self).__init__()
+        self.register_buffer("weight", torch.ones(n))
+        self.register_buffer("bias", torch.zeros(n))
+        self.register_buffer("running_mean", torch.zeros(n))
+        self.register_buffer("running_var", torch.ones(n))
+
+    def forward(self, x):
+        scale = self.weight * self.running_var.rsqrt()
+        bias = self.bias - self.running_mean * scale
+        scale = scale.reshape(1, -1, 1, 1)
+        bias = bias.reshape(1, -1, 1, 1)
+        return x * scale + bias
 
 class MoCo(nn.Module):
     """
@@ -23,9 +44,30 @@ class MoCo(nn.Module):
 
         # create the encoders
         # num_classes is the output fc dimension
-        self.encoder_q = base_encoder(num_classes=dim)
-        self.encoder_k = base_encoder(num_classes=dim)
-
+        self.encoder_q = base_encoder(pretrained=True) #, num_classes=dim)
+        self.encoder_k = base_encoder(pretrained=True) #, num_classes=dim)
+        self.use_old_model = True
+        self.use_cosine = False
+        def change_batch(encoder):
+            encoder = nn.Sequential(*list(encoder.children()))
+            encoder[1] = torch.nn.Identity()
+            for i in range(4,8):
+                for j in range(6):
+                    try:
+                        encoder[i][j].bn1 = torch.nn.Identity()
+                        encoder[i][j].bn2 = torch.nn.Identity()
+                        encoder[i][j].bn3 = torch.nn.Identity()
+                        encoder[i][j].downsample[1] = torch.nn.Identity()
+                    except:
+                        print('failed', i)
+            return encoder
+        #change_batch(self.encoder_q)
+        #change_batch(self.encoder_k)
+        #self.encoder_q.bn1 = torch.nn.Identity()
+        #self.encoder_k.bn1 = torch.nn.Identity()
+        if self.use_old_model:
+            self.encoder_q = nn.Sequential(*list(self.encoder_q.children())[:-1])
+            self.encoder_k = nn.Sequential(*list(self.encoder_k.children())[:-1])
         if mlp:  # hack: brute-force replacement
             dim_mlp = self.encoder_q.fc.weight.shape[1]
             self.encoder_q.fc = nn.Sequential(nn.Linear(dim_mlp, dim_mlp), nn.ReLU(), self.encoder_q.fc)
@@ -117,6 +159,12 @@ class MoCo(nn.Module):
 
         return x_gather[idx_this]
 
+    def cosine_distance(self, x1, x2=None, eps=1e-8):
+            x2 = x1 if x2 is None else x2
+            w1 = x1.norm(p=2, dim=1, keepdim=True)
+            w2 = w1 if x2 is x1 else x2.norm(p=2, dim=1, keepdim=True)
+            return 1 - torch.mm(x1, x2.t()) / (w1 * w2.t()).clamp(min=eps)
+
     def forward(self, im_q, im_k = None, indexes= None, only_eval = False):
         """
         Input:
@@ -127,7 +175,10 @@ class MoCo(nn.Module):
         """
 
         # compute query features
+        
         q = self.encoder_q(im_q)  # queries: NxC
+        if self.use_old_model:
+            q = q.mean(2).mean(2)
         q = nn.functional.normalize(q, dim=1)
         
         if only_eval: 
@@ -141,19 +192,28 @@ class MoCo(nn.Module):
             # shuffle for making use of BN
             im_k, idx_unshuffle = self._batch_shuffle_ddp(im_k)
             k = self.encoder_k(im_k)  # keys: NxC
+            if self.use_old_model:
+                k = k.mean(2).mean(2)
             k = nn.functional.normalize(k, dim=1)
             # undo shuffle
             k = self._batch_unshuffle_ddp(k, idx_unshuffle)
         # compute logits
-        # Einstein sum is more intuitive
-        # positive logits: Nx1
-        l_pos = torch.einsum('nc,nc->n', [q, k]).unsqueeze(-1)
-        # negative logits: NxK
-        l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
         
+        if self.use_cosine:
+            l_pos = torch.nn.CosineSimilarity()(q,k).unsqueeze(-1)
+            l_neg = self.cosine_distance(q,self.queue.T.clone().detach())
+        else:
+            # Einstein sum is more intuitive
+            # positive logits: Nx1
+            l_pos = torch.einsum('nc,nc->n', [q, k]).unsqueeze(-1)
+            # negative logits: NxK
+            l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
         
         # TODOOOOOOOOO
-        l_neg[:,indexes] = -100 # Hack not add to loss
+        l_neg[:,indexes] = -10000 # Hack not add to loss
+        #how_many = l_neg.shape[1]
+        #perm = np.random.permutation(how_many)[:-500]  #only consider last 500 for comparisons
+        #l_neg[:,perm] = -100 # Hack not add to loss
 
         # logits: Nx(1+K)
         logits = torch.cat([l_pos, l_neg], dim=1)
@@ -178,6 +238,8 @@ class MoCo(nn.Module):
 
         # compute query features
         q = self.encoder_q(im) 
+        if self.use_old_model:
+            q = q.mean(2).mean(2)
         q = nn.functional.normalize(q, dim=1)
         return q
 

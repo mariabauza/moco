@@ -7,6 +7,7 @@ import shutil
 import sys
 import importlib
 import time
+#import matplotlib.pyplot as plt
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, args,is_train = False):
@@ -54,6 +55,7 @@ class Dataset(torch.utils.data.Dataset):
         np.save('moco/sensor_name.npy',args.sensor_name)
         np.save('moco/is_vision.npy',args.is_vision)
         np.save('moco/change_gripper.npy',args.change_gripper)
+        np.save('moco/program_pid.npy',os.getpid())
         self.tmp_data_path = 'tmp_data/'
         tmp_data = self.tmp_data_path + '*{}*.npy'.format(self.object_name)
         if len(glob.glob(tmp_data)):
@@ -105,7 +107,6 @@ class Dataset(torch.utils.data.Dataset):
             mask_num = item.replace('.png', '').split('_')[-1]
             item = '../claudia/position/{}/{}_pointrend/predicted_mask_{}.png'.format(self.object_name, self.object_name, mask_num)
         ls1 = cv2.resize(cv2.imread(item), (self.size2,self.size1) ).astype(np.float32) 
-        ls1 = (ls1>250).astype(np.float32)*255.0
         if self.is_vision:
             img_item = item.replace('0.png','obj_depth_0.png')
             img = cv2.imread(img_item)
@@ -119,11 +120,18 @@ class Dataset(torch.utils.data.Dataset):
         while ls2 is None:
             try:
                 if self.is_test:  #NO given LS for testing with real data
+                    #ls1 = (ls1>250).astype(np.float32)*255.0
+                    max_val = np.amin(ls1) + 25
+                    max_val= 250
+                    ls1 = (ls1>max_val).astype(np.float32)*255.0
                     ls2 = np.copy(ls1)
                 else:
                     ls2 = cv2.resize(cv2.imread(item.replace('0.png','4.png')), (self.size2,self.size1) ).astype(np.float32)                
-                    max_val = np.amin(ls2) + np.random.randint(int(51/5),51)
+                    max_val = np.amin(ls2) + np.random.randint(int(51/5),101)
                     ls2 = (ls2>max_val).astype(np.float32)*255.0
+                    #max_val = np.amin(ls1) + 25
+                    max_val= 250
+                    ls1 = (ls1>max_val).astype(np.float32)*255.0
                     if self.is_vision: # Add some sort of data aug
                         depth2 = cv2.resize(cv2.imread(img_item.replace('0.png','4.png')), (self.size2,self.size1) ).astype(np.float32) 
             except:
@@ -142,6 +150,8 @@ class Dataset(torch.utils.data.Dataset):
             ls1[:,:,1] = np.copy(depth1[:,:,0])
             ls2[:,:,1] = np.copy(depth2[:,:,0])
         
+        
+        #plt.imshow(np.concatenate([ls1,ls2], axis=1)); plt.show()
         ls1 = ls1.swapaxes(0,2).swapaxes(1,2)
         ls2 = ls2.swapaxes(0,2).swapaxes(1,2)
         

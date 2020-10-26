@@ -11,22 +11,6 @@ import warnings
 import copy
 import sys, pdb
 
-
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
-
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
-
-
-
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -162,7 +146,8 @@ import importlib
 
 def main():
     args = parser.parse_args()
-
+    args.moco_dim = 2048
+    args.lr = 0.0001
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -184,7 +169,7 @@ def main():
 
     ngpus_per_node = torch.cuda.device_count()
     args.model_dir += '/'
-    print('model dir:', args.model_dir)
+    print('model dir:', args.model_dir, 'lr', args.lr)
     if args.multiprocessing_distributed:
         # Since we have ngpus_per_node processes per node, the total world_size
         # needs to be adjusted accordingly
@@ -269,7 +254,8 @@ def main_worker(gpu, ngpus_per_node, args):
         models.__dict__[args.arch],
         args.moco_dim, args.moco_k, args.moco_m, args.moco_t, args.mlp)
     #print(model)
-
+    args.distributed = False
+    print('GPU', args.gpu)
     if args.distributed:
         # For multiprocessing distributed, DistributedDataParallel constructor
         # should always set the single device scope, otherwise,
@@ -292,7 +278,7 @@ def main_worker(gpu, ngpus_per_node, args):
         torch.cuda.set_device(args.gpu)
         model = model.cuda(args.gpu)
         # comment out the following line for debugging
-        raise NotImplementedError("Only DistributedDataParallel is supported.")
+        #raise NotImplementedError("Only DistributedDataParallel is supported.")
     else:
         # AllGather implementation (batch shuffle, queue update, etc.) in
         # this code only supports DistributedDataParallel.
@@ -308,6 +294,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # optionally resume from a checkpoint
     if args.resume:
         args.resume = path_data + '/models/' + args.model_dir +'/' + args.resume
+        standard_resume = path_data + '/models/' + args.model_dir +'/' + '20_oct_checkpoint_0119.pth.tar'
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
             if args.gpu is None:
@@ -316,17 +303,30 @@ def main_worker(gpu, ngpus_per_node, args):
                 # Map model to be loaded to specified single gpu.
                 loc = 'cuda:{}'.format(args.gpu)
                 checkpoint = torch.load(args.resume, map_location=loc)
-                
-            if 'queue_aux' in checkpoint['state_dict'].keys():
-                del checkpoint['state_dict']['queue_aux']
-            args.start_epoch = checkpoint['epoch']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
+            
+            
+            try: 
+                if 'queue_aux' in checkpoint['state_dict'].keys():
+                    del checkpoint['state_dict']['queue_aux']
+                model.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                args.start_epoch = checkpoint['epoch']
+                print("=> loaded checkpoint '{}' (epoch {})"
+                      .format(args.resume, checkpoint['epoch']))
+            except:
+                for key in list(checkpoint.keys()):
+                    checkpoint[key.replace('mod', 'encoder_q')] = checkpoint[key]
+                    checkpoint[key.replace('mod', 'encoder_k')] = checkpoint.pop(key)
+                stat_dic = torch.load(standard_resume, map_location=loc)['state_dict']                
+                checkpoint['queue'] =  torch.zeros([2048, 6416]).cuda() #stat_dic['module.queue']#torch.zeros(1, dtype=torch.long) #nn.functional.normalize(queue, dim=0).cuda()
+                checkpoint['queue_ptr'] = stat_dic['module.queue_ptr']#orch.zeros(1, dtype=torch.long)
+                #print(checkpoint.keys())
+                model.load_state_dict(checkpoint)
+                args.start_epoch = 0
+            
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
-
+            assert(False)
     cudnn.benchmark = True
         
     if args.distributed:
@@ -336,10 +336,12 @@ def main_worker(gpu, ngpus_per_node, args):
         true_sampler = torch.utils.data.distributed.DistributedSampler(true_dataset)
     else:
         train_sampler = None
-        cal_sampler = None
+        val_sampler = None
+        real_sampler = None
+        true_sampler = None
 
     train_loader = torch.utils.data.DataLoader(
-        dataset=train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+        dataset=train_dataset, batch_size=args.batch_size, shuffle=True, #(train_sampler is None),
             num_workers=args.workers,
             pin_memory=True, sampler=train_sampler, drop_last=True)
         
@@ -357,7 +359,8 @@ def main_worker(gpu, ngpus_per_node, args):
         dataset=true_dataset, batch_size=args.batch_size, shuffle=(true_sampler is None),
             num_workers=args.workers,
             pin_memory=True, sampler=true_sampler, drop_last=True)
-
+    
+    epoch = np.copy(args.start_epoch)
     if not args.only_eval:
         best_dist = 1
         for epoch in range(args.start_epoch, args.epochs):
@@ -386,54 +389,94 @@ def main_worker(gpu, ngpus_per_node, args):
                         'arch': args.arch,
                         'state_dict': model.state_dict(),
                         'optimizer' : optimizer.state_dict(),
-                    }, is_best=save_best, filename= path_data + '/models/{}/13_oct_checkpoint_{:04d}.pth.tar'.format(args.model_dir, epoch))
+                    }, is_best=save_best, filename= path_data + '/models/{}/23_oct_checkpoint_{:04d}.pth.tar'.format(args.model_dir, epoch))
                         # train for one epoch
             print('Time: ', time.time()-init)
-            if (epoch +1) % 5 == 0:
-                
-                print('Testing without new queue')
-                paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args, use_current_queue = True)         
-                save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data)
-                print(time.time() - init, 'done eval for TRUE')
-                os.system('python3 moco/test_matches.py -n {}'.format(epoch)) 
-                
+            if (epoch +1) % 1== 0:
+                model.eval()
+                type_data='real'
+                with_queue = 0
                 paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True)
-                save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data)
-                print(time.time() - init, 'done eval for REAL')
-                os.system('python3 moco/test_matches.py -n {}'.format(epoch)) 
+                save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
+                print(time.time() - init, 'done eval for REAL --------------------------')
+                os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                model.eval()
+                if 0:
+                    with_queue = 0
+                    print('Testing without new queue')
+                    try: 
+                        type_data = 'test'
+                        paths_pred, paths_target = evaluate(train_loader, model, criterion, path_data, args, use_current_queue = True)         
+                        save_paths(paths_pred, paths_target, train_dataset, train_dataset, epoch, path_data, type_data, with_queue)
+                        print(time.time() - init, 'done eval for TRAIN --------------------------')
+                        os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                    except: pass
+                    
+                    type_data = 'true'
+                    paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args, use_current_queue = True)         
+                    save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue)
+                    print(time.time() - init, 'done eval for TRUE --------------------------')
+                    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                    
+                    type_data='real'
+                    paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True)
+                    save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
+                    print(time.time() - init, 'done eval for REAL --------------------------')
+                    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                
+                if 0:    
+                    with_queue = 1
+                    print('Updating queue')
+                    matches_path = path_data + '/23_oct_matches_{}_{}_queue={}/'.format(epoch, 'test', with_queue)
+                    update_queue(train_loader, model, args, matches_path)
+                    print(time.time() - init, 'done queue')
+                
+                    try:
+                        type_data='test'
+                        paths_pred, paths_target = evaluate(train_loader, model, criterion, path_data, args)         
+                        save_paths(paths_pred, paths_target, train_dataset, train_dataset, epoch, path_data, type_data, with_queue)
+                        print(time.time() - init, 'done eval for TRAIN --------------------------')
+                        os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                    except: pass
+                    
+                    type_data= 'true'
+                    paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args)         
+                    save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue)
+                    print(time.time() - init, 'done eval for TRUE --------------------------')
+                    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                
+                    type_data='real'
+                    paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args)
+                    save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
+                    print(time.time() - init, 'done eval for REAL --------------------------')
+                    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue))                 
                 
                 
-                print('Updating queue')
-                update_queue(train_loader, model, args)
-                print(time.time() - init, 'done queue')
-                
-                paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args)         
-                save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data)
-                print(time.time() - init, 'done eval for TRUE')
-                os.system('python3 moco/test_matches.py -n {}'.format(epoch)) 
-                
-                paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args)
-                save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data)
-                print(time.time() - init, 'done eval for REAL')
-                os.system('python3 moco/test_matches.py -n {}'.format(epoch))                 
-                
-                
+    model.eval()
+    #model.train()
+    if args.is_real: type_data='real'
+    else: type_data = 'true'
+    
+    with_queue=1
+    matches_path = path_data + '/23_oct_matches_{}_{}_queue={}/'.format(epoch, 'test', with_queue)
     print('Updating queue')
-    update_queue(train_loader, model, args)
-    # train for one epoch
-    #dists, closest_dists = evaluate(val_loader, model, criterion, path_data, args)
+    update_queue(train_loader, model, args, matches_path, load_from_saved =True)
     print('Evaluating loader')
-    paths_pred, paths_target = evaluate(val_loader, model, criterion, path_data, args)
-    save_paths(paths_pred, paths_target, train_dataset, val_dataset, args.start_epoch, path_data)
-    os.system('python3 moco/test_matches.py -n {}'.format(args.start_epoch) ) 
+    paths_pred, paths_target = evaluate(val_loader, model, criterion, path_data, args, use_current_queue = False)         
+    save_paths(paths_pred, paths_target, train_dataset, val_dataset, args.start_epoch-1, path_data, type_data, with_queue)
+    print(args.start_epoch)
 
-def save_paths(paths_pred, paths_target, train_dataset,val_dataset, epoch, path_data):
-    matches_path = path_data + '/matches_{}/'.format(epoch)
+    
+    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(args.start_epoch-1, type_data, with_queue) ) 
+
+def save_paths(paths_pred, paths_target, train_dataset,val_dataset, epoch, path_data, type_data, with_queue):
+    matches_path = path_data + '/23_oct_matches_{}_{}_queue={}/'.format(epoch, type_data, with_queue)
     os.makedirs(matches_path, exist_ok=True)
     for it_p, ind in enumerate(paths_target):
 
         path = val_dataset.list_trans[ind]
-        path_save = matches_path + 'predicted' + path.replace('transformation', 'matches_moco={}'.format(epoch)).replace('trans','matches_moco={}'.format(epoch)).split('predicted')[-1]
+        if 'predicted' in path: path_save = matches_path + 'predicted' + path.replace('transformation', 'matches_moco={}'.format(epoch)).replace('trans','matches_moco={}'.format(epoch)).split('predicted')[-1]
+        else: path_save = matches_path + 'predicted' + path.replace('transformation', 'matches_moco={}'.format(epoch)).replace('trans','matches_moco={}'.format(epoch)).split('/')[-1]
         list_pred = []
         list_LS_pred = []
         for i in paths_pred[it_p]:
@@ -458,6 +501,8 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
     # switch to train mode
     model.train()
+    
+    
     end = time.time()
     dists_all = []
     closest_dists_all = []
@@ -487,8 +532,10 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        if epoch != 0: 
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -503,7 +550,6 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         else:
             paths_pred = np.copy(path_pred).tolist()
             paths_target = np.copy(path_target).tolist()
-        
     progress.display(len(train_loader)-1)
     
     return acc1, acc5, paths_pred, paths_target
@@ -513,18 +559,20 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')
 
-def evaluate(val_loader, model, criterion, path_data, args, use_current_queue = False):
+def evaluate(val_loader, model, criterion, path_data, args, use_current_queue = False, use_train = False):
     batch_time = AverageMeter('Time', ':6.3f'); data_time = AverageMeter('Data', ':6.3f'); losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f'); top5 = AverageMeter('Acc@5', ':6.2f')
     epoch = 0
     progress = ProgressMeter(len(val_loader),[batch_time, data_time, losses, top1, top5],prefix="Epoch: [{}]".format(epoch))
 
     model.eval()
+    if use_train:
+        model.train()
     end = time.time()
     dists_all = []; closest_dists_all = []
     paths_pred = []; paths_target = []
     for i, images in enumerate(val_loader):
-        
+        #if i > 20: break
         # measure data loading time
         data_time.update(time.time() - end)
         if args.gpu is not None:
@@ -541,6 +589,7 @@ def evaluate(val_loader, model, criterion, path_data, args, use_current_queue = 
             
             #queries = nn.functional.normalize(queries, dim=1)
             output = torch.einsum('nc,ck->nk', [queries, model.queue_aux.clone().detach()])
+            #output = model.cosine_distance(queries,model.queue_aux.T.clone().detach())
         target = indexes.cuda()
         loss = criterion(output, target)
         
@@ -577,22 +626,35 @@ def evaluate(val_loader, model, criterion, path_data, args, use_current_queue = 
     '''
     
     
-def update_queue(train_loader, model, args):
+def update_queue(train_loader, model, args, matches_path, load_from_saved = False, use_train = False):
+    
+    
+    os.makedirs(matches_path, exist_ok=True)
+    filename= matches_path + '/queueu.pth.tar'
     
     model.eval()
+    if use_train:
+        model.train()
     #print(model.named_modules)
     model.register_buffer("queue_aux", torch.randn(args.moco_dim, args.moco_k))
     model.queue_aux = nn.functional.normalize(model.queue_aux, dim=0).cuda()
-    for i, images in enumerate(train_loader):
-        if args.gpu is not None:
-            #images[0] = images[0].cuda(args.gpu, non_blocking=True)
-            images[1] = images[1].cuda(args.gpu, non_blocking=True)
-            indexes = images[2]
-        keys = model(images[1])
-        keys = nn.functional.normalize(keys, dim=1)
-        keys = moco.builder.concat_all_gather(keys)
-        model.queue_aux[:, indexes] = keys.T
-
+    
+    if load_from_saved and os.path.exists(filename):
+        model.queue_aux = torch.load(filename)['queue_aux']
+    else:
+        for i, images in enumerate(train_loader):
+            if args.gpu is not None:
+                #images[0] = images[0].cuda(args.gpu, non_blocking=True)
+                images[1] = images[1].cuda(args.gpu, non_blocking=True)
+                indexes = images[2]
+            keys = model(images[1])
+            keys = nn.functional.normalize(keys, dim=1)
+            keys = moco.builder.concat_all_gather(keys)
+            model.queue_aux[:, indexes] = keys.T
+        
+        state = {'queue_aux': model.queue_aux}
+        torch.save(state, filename)
+    
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self, name, fmt=':f'):

@@ -21,6 +21,7 @@ object_name = np.load('moco/object_name.npy')
 grid_name = np.load('moco/grid_name.npy')  
 is_vision = np.load('moco/is_vision.npy') 
 change_gripper = np.load('moco/change_gripper.npy') 
+program_pid = np.load('moco/program_pid.npy') 
 
 print('Generate data from:', sensor_name, object_name, grid_name)
 
@@ -106,10 +107,19 @@ def generate_noisy_sample(path):
         
     return
 
+def check_pid(pid):        
+    """ Check For the existence of a unix pid. """
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    else:
+        return True
+
 if __name__ == "__main__":
     last_path = None
     time.sleep(5)
-    while True:
+    while check_pid(program_pid):
         try:
             list_files = glob.glob('tmp_data/*{}*.npy'.format(object_name))
             list_files.sort(key=os.path.getmtime)
@@ -131,4 +141,4 @@ if __name__ == "__main__":
                     #print('Fails load or compute file:', list_files[num])
                     count += 1
         else: continue
-
+    else: print('Exiting generate data program')

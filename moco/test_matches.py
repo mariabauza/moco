@@ -17,29 +17,36 @@ import argparse
 #import pdb; pdb.set_trace()
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--num_epoch", type=int, default=-1)
+parser.add_argument("-t", "--type_data", type=str, default=-1)
+parser.add_argument("-q", "--is_queue", type=int, default=-1)
 args = parser.parse_args()
 num_epoch = args.num_epoch
-
+is_queue = args.is_queue
+type_data = args.type_data
 
 sensor_name = 'green_sensor'
 object_name = 'grease_view1'
 #object_name = 'pin_view2'
 grid_name = 'face1'
+#grid_name = 'final'
 sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
 
 object_3D = Object3D(object_name, sensor, False, False)
 path_data = 'data/{}_{}'.format(object_name, grid_name)
-debug_data = path_data +'/images_debug/'
-matches_data = path_data +'/matches_{}/'
+debug_data = path_data +'/23_oct_images_debug/'
+matches_data = path_data +'/23_oct_matches_{}_{}_queue={}/'
 os.makedirs(debug_data, exist_ok = True)
 
 list_images = glob.glob(os.environ['HOME'] + '/tactile_localization/data_tactile_localization/{}/{}/grids/{}/transformation*1.npy'.format(sensor_name, object_name, grid_name))
 list_images.sort(key=os.path.getmtime)
 list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_LS_[0-9]*npy'.format(object_name))
 list_images2.sort(key=os.path.getmtime)
-list_images3 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_true_LS*npy'.format(object_name))
-list_images3.sort(key=os.path.getmtime)
-print('Len list iamges:', len(list_images), len(list_images2), len(list_images3))
+replacement = 'ed_LS'
+if type_data == 'true':
+    list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_true_LS_[0-9]*npy'.format(object_name))
+    list_images2.sort(key=os.path.getmtime)
+    replacement = 'ed_true_LS'
+print('Len list iamges:', len(list_images), len(list_images2))
 
 
 
@@ -90,7 +97,7 @@ def compute_closest(trans, from_grid = False):
 
 
 if num_epoch == -1:
-    epochs = np.arange(49,200)
+    epochs = np.arange(79,200)
 else:
     epochs = [num_epoch]
 
@@ -103,28 +110,42 @@ for it in epochs:
     rand_errors50 = []
     closest_pos = []
     closest_errors = []
-    counter_path = matches_data.format(it) + 'counter.npy'
+    counter_path = matches_data.format(it, type_data, is_queue) + 'counter.npy'
+    
+    
+    
+    if type_data != 'test': path_trans_matches = matches_data.format(it, type_data, is_queue) + 'predicted' + list_images2[0].replace(replacement, 'ed_matches_moco={}'.format(it)).split('predicted')[-1]
+    else: path_trans_matches = matches_data.format(it, type_data, is_queue) + 'predicted' + list_images[0].replace('transformation', 'matches_moco={}'.format(it)).split('/')[-1]
+    if not os.path.exists(path_trans_matches): 
+        print('NO: ', path_trans_matches)
+        continue  
+    
     if not os.path.exists(counter_path): 
         case_type = 0
     else:
         case_type = (np.load(counter_path)+1) % 4
     np.save(counter_path, case_type)
-        
     
-    path_trans_matches = matches_data.format(it) + 'predicted' + list_images2[0].replace('ed_LS', 'ed_matches_moco={}'.format(it)).split('predicted')[-1]
-    if not os.path.exists(path_trans_matches): continue  
     print('Epoch:', it)
     count = 0
     #if case_type == 3: list_images2 = list_images3
-    for it2, item in enumerate(list_images2):
-        ls = cv2.imread(item.replace('npy','png'))
-        path_trans = item.replace('ed_LS', 'ed_trans')
-        path_closest = item.replace('ed_LS', 'ed_closest_trans')
-        path_dist_closest = item.replace('ed_LS', 'ed_dist_closest_trans')
-        path_trans_matches = matches_data.format(it) + 'predicted' + item.replace('ed_LS', 'ed_matches_moco={}'.format(it)).split('predicted')[-1]
-        path_LS_matches = matches_data.format(it) + 'predicted' + item.replace('ed_LS', 'ed_LS_matches_moco={}'.format(it)).split('predicted')[-1]
+    if type_data =='test': list_img = list_images
+    else: list_img = list_images2
+    max_val = 250
+    for it2, item in enumerate(list_img):
+        ls1 = cv2.imread(item.replace('npy','png'))
+        #max_val = np.amin(ls1) + 25
+        ls1 = (ls1>max_val).astype(np.float32)*255.0
+        path_trans = item.replace(replacement, 'ed_trans')
+        path_closest = item.replace(replacement, 'ed_closest_trans')
+        path_dist_closest = item.replace(replacement, 'ed_dist_closest_trans')
+        path_trans_matches = matches_data.format(it, type_data, is_queue) + 'predicted' + item.replace(replacement, 'ed_matches_moco={}'.format(it)).split('predicted')[-1]
+        path_LS_matches = matches_data.format(it, type_data, is_queue) + 'predicted' + item.replace(replacement, 'ed_LS_matches_moco={}'.format(it)).split('predicted')[-1]
+        if type_data =='test':
+            path_trans_matches = matches_data.format(it, type_data, is_queue) + 'predicted' + item.replace('transformation', 'matches_moco={}'.format(it)).split('/')[-1]
+            path_LS_matches = matches_data.format(it, type_data, is_queue) + 'predicted' + item.replace('transformation', 'LS_matches_moco={}'.format(it)).split('/')[-1]
         if not os.path.exists(path_trans_matches): 
-            count += 1; print('Path do not exist num:', count)
+            count += 1; print('Path do not exist num:', count, path_trans_matches)
             continue  
         trans = np.load(path_trans)
         if 'grease' not in object_name:
@@ -137,26 +158,30 @@ for it in epochs:
         err_vec = []
         pos = -1
         for i, match in enumerate(matches):            
-            aa = np.load(path_LS_matches)[i]
             
-            ls2 = cv2.imread(aa)            
+            all_tran = np.load(match.replace('local_shape', 'transformation').replace('png', 'npy'), allow_pickle=True)
+            #if type_data =='test': all_tran = all_tran.trans
             
-            all_tran = np.load(match)            
             err_i = trans_dist(trans, all_tran)
             err_vec.append(err_i)
-            if abs(closest_error - err_i) < 0.00001:
-                pos = np.copy(i)
+            if type_data != 'test': 
+                if abs(closest_error - err_i) < 0.00001:
+                    pos = np.copy(i)
                 
             if 0 and i == 0: 
-                
+                aa = np.load(path_LS_matches)[i]
+            
+                ls2 = cv2.imread(aa)            
+                #max_val = np.amin(ls2) + 25
+                ls2 = (ls2>max_val).astype(np.float32)*255.0
                 #print(trans, all_tran)
                 #print(err_i)
-                plt.imshow(np.concatenate([ls, ls2], axis=1)); 
+                plt.imshow(np.concatenate([ls1, ls2], axis=1)); 
                 if 0: 
                     plt.show()
-                fig_name = debug_data + 'best_match_epoch={}_case={}_err={}.png'.format(it, case_type,np.round(err_i*1000,1))
+                fig_name = debug_data + 'best_match_epoch={}_type={}_case={}_err={}.png'.format(it, type_data, case_type,np.round(err_i*1000,1))
                 plt.savefig(fig_name)
-                fig_name = matches_data.format(it) + '/best_match_epoch={}_case={}_err={}.png'.format(it, case_type,np.round(err_i*1000,1))
+                fig_name = matches_data.format(it, type_data, is_queue) + '/best_match_epoch={}_type={}_case={}_err={}.png'.format(it, type_data, case_type,np.round(err_i*1000,1))
                 plt.savefig(fig_name)
                 np.save(fig_name.replace('png', 'npy'), [item.replace('npy','png'), aa])
 
@@ -170,6 +195,7 @@ for it in epochs:
         ### Compute random errors
         rand_err_vec = []
         path_trans = glob.glob(matches[0].split('transform')[0] + 'transformation_[0-9]*npy')
+        #print(matches[0])
         perm = np.random.permutation(len(path_trans))[:len(matches)]
         rand_matches = np.array(path_trans)[perm]
         for i, match in enumerate(rand_matches):     
@@ -189,7 +215,7 @@ for it in epochs:
     dict_error['rand_errors'] = rand_errors
     dict_error['rand_errors10'] = rand_errors10
     dict_error['rand_errors50'] = rand_errors50
-    np.save( matches_data.format(it) + 'dict_error_case={}.npy'.format(case_type), dict_error)
+    np.save( matches_data.format(it, type_data, is_queue) + 'dict_error_case={}.npy'.format(case_type), dict_error)
     if 0:
         closest_errors = np.round(np.array(closest_errors)*1000,1)
         errors = np.round(np.array(errors)*1000,1)
@@ -198,14 +224,14 @@ for it in epochs:
         rand_errors = np.round(np.array(rand_errors)*1000,1)
         rand_errors10 = np.round(np.array(rand_errors10)*1000,1)
         rand_errors50 = np.round(np.array(rand_errors50)*1000,1)
-    print(it, 'Error:', np.round(np.median(errors)*1000,1), np.round(np.mean(errors)*1000, 1))
+    print(it, type_data, is_queue,'Error:', np.round(np.median(errors)*1000,1), np.round(np.mean(errors)*1000, 1))
     print('          ', np.round(np.median(rand_errors)*1000,1), 'random')
-    print(it, 'Error10:', np.round(np.median(errors10)*1000,1), np.round(np.mean(errors10)*1000, 1))
+    print(it, type_data, is_queue,'Error10:', np.round(np.median(errors10)*1000,1), np.round(np.mean(errors10)*1000, 1))
     print('            ', np.round(np.median(rand_errors10)*1000,1), 'random')
-    print(it, 'Error50:', np.round(np.median(errors50)*1000,1), np.round(np.mean(errors50)*1000, 1))
+    print(it, type_data, is_queue, 'Error50:', np.round(np.median(errors50)*1000,1), np.round(np.mean(errors50)*1000, 1))
     print('            ', np.round(np.median(rand_errors50)*1000,1), 'random')
-    print(it, 'Closest Error:',  np.round(np.median(closest_errors)*1000,1), np.round(np.mean(closest_errors)*1000,1))
+    print(it, type_data, is_queue, 'Closest Error:',  np.round(np.median(closest_errors)*1000,1), np.round(np.mean(closest_errors)*1000,1))
     print('            ', np.round(np.median(rand_errors)*1000,1), 'random')
     arr_closest_pos = np.array(closest_pos)
-    print(it, 'Closest Pos:', np.median(arr_closest_pos[arr_closest_pos > 0]), np.mean(arr_closest_pos[arr_closest_pos > 0]), np.sum(arr_closest_pos > 0), len(arr_closest_pos))
+    print(it, type_data, is_queue, 'Closest Pos:', np.median(arr_closest_pos[arr_closest_pos > 0]), np.mean(arr_closest_pos[arr_closest_pos > 0]), np.sum(arr_closest_pos > 0), len(arr_closest_pos))
         

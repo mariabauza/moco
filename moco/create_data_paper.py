@@ -15,11 +15,13 @@ from tactile_localization.classes.local_shape import LocalShape, Transformation
 
 
 sensor_name = 'green_sensor'
-object_name = 'head_view1'
-grid_name = 'face1'
+object_name = 'grease_view1'
+grid_name = 'final'
 sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
 list_images = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*npy'.format(object_name))
+list_images.sort(key=os.path.getmtime)
 list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_LS*npy'.format(object_name))
+list_images2.sort(key=os.path.getmtime)
 
 sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
 object_3D = Object3D(object_name, sensor, False, False)
@@ -28,6 +30,25 @@ object_3D = Object3D(object_name, sensor, False, False)
 #aa = glob.glob('*npy')
 #for a in aa:   
 #cv2.imwrite(a.replace('.npy','.png'), (1-np.load(a))*255)
+for item in list_images:
+        
+    trans_path = item.replace('ed_true_LS', "ed_trans")
+    transformation = np.load(trans_path)
+    png_item = item.replace('.npy','.png')
+    if not os.path.exists(png_item):
+        transformation[2,3] *= -1 
+        np.save(trans_path, transformation)
+        ls, transformation_real = object_3D.renderTransformation(Transformation(transformation))
+        
+        if ls is None:
+            print('No LS for item:', item)
+            continue
+        else: 
+            ls.toPNG(sensor)
+            cv2.imwrite(png_item, ls.ls)
+            print('Done:', item)
+            
+            
 for item in list_images:
         
     png_item = item.replace('.npy','.png')
@@ -62,7 +83,7 @@ for item in list_images2:
     
         real_ls.realToBin(0.0006, sensor, True)
         cv2.imwrite(png_item, (real_ls.ls < 1)*255)
-
+#assert(False)
 
 ### Add somethinng that computtes closest in grid
 
@@ -95,8 +116,8 @@ else:
     object_3D = Object3D(object_name, sensor, False, False)
 
 
-path_data = 'data/{}_{}/train/'.format(object_name, grid_name)
-list_trans = glob.glob(path_data + '*/transformation.npy')
+list_trans = glob.glob(os.environ['HOME'] + '/tactile_localization/data_tactile_localization/{}/{}/grids/{}/transformation*1.npy'.format(sensor_name, object_name, grid_name))
+list_trans.sort(key=os.path.getmtime)
 all_trans = []
 for path in list_trans:
     trans = np.load(path)
@@ -109,7 +130,7 @@ all_trans = np.array(all_trans)
 def compute_closest(trans):
     error = []
     
-    trans[2,3] *=-1
+    
     for it, all_tran in enumerate(all_trans):
         
         points1 = np.dot(object_3D.pcd_points_no_centering,trans[:3,:3].T) + trans[:3,3]
@@ -132,7 +153,7 @@ for item in list_images2:
     path_trans = item.replace('ed_LS', 'ed_trans')
     path_closest = item.replace('ed_LS', 'ed_closest_trans')
     path_dist_closest = item.replace('ed_LS', 'ed_dist_closest_trans')
-    if not os.path.exists(path_closest):
+    if 1 or not os.path.exists(path_closest):
         try:
             transformation_real = Transformation(np.load(path_trans))
             if 'head' in object_name:
@@ -148,4 +169,5 @@ for item in list_images2:
         print('Error:', error, np.median(errors), np.mean(errors))
         np.save(path_closest, trans)
         np.save(path_dist_closest, error)
+np.save('errors_{}.npy'.format(grid_name), errors)
         #break
