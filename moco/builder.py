@@ -210,7 +210,9 @@ class MoCo(nn.Module):
             l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
         
         # TODOOOOOOOOO
-        l_neg[:,indexes] = -10000 # Hack not add to loss
+        l_neg[np.arange(indexes.shape[0]),indexes] = 0 # Hack not add to loss
+        #for i in range(5):
+        #    print(i, l_pos[i] > l_neg[i, indexes[i]], 'Pos', l_pos[i], 'Neg', l_neg[i,indexes[i]], l_neg[i,indexes[:5]], print(torch.min(l_neg)))
         #how_many = l_neg.shape[1]
         #perm = np.random.permutation(how_many)[:-500]  #only consider last 500 for comparisons
         #l_neg[:,perm] = -100 # Hack not add to loss
