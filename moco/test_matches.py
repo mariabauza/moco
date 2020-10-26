@@ -1,3 +1,4 @@
+import open3d
 import torch
 import glob
 import numpy as np
@@ -7,7 +8,7 @@ import shutil
 import sys
 import importlib
 
-sys.path.append('/home/mcube/tactile_localization/')
+sys.path.append('../tactile_localization/')
 from tactile_localization.constants import constants
 from tactile_localization.classes.grid import Grid2D, Grid3D
 from tactile_localization.classes.object_manipulator import Object3D
@@ -39,18 +40,18 @@ os.makedirs(debug_data, exist_ok = True)
 
 list_images = glob.glob(os.environ['HOME'] + '/tactile_localization/data_tactile_localization/{}/{}/grids/{}/transformation*1.npy'.format(sensor_name, object_name, grid_name))
 list_images.sort(key=os.path.getmtime)
-list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_LS_[0-9]*npy'.format(object_name))
+list_images2 = glob.glob('../tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_LS_[0-9]*npy'.format(object_name))
 list_images2.sort(key=os.path.getmtime)
 replacement = 'ed_LS'
 if type_data == 'true':
-    list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_true_LS_[0-9]*npy'.format(object_name))
+    list_images2 = glob.glob('../tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_true_LS_[0-9]*npy'.format(object_name))
     list_images2.sort(key=os.path.getmtime)
     replacement = 'ed_true_LS'
 print('Len list iamges:', len(list_images), len(list_images2))
 
 
 
-sys.path.append('/home/mcube/tactile_localization/')
+sys.path.append('../tactile_localization/')
 from tactile_localization.constants import constants
 from tactile_localization.classes.grid import Grid2D, Grid3D
 from tactile_localization.classes.object_manipulator import Object3D    
