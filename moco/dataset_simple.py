@@ -33,6 +33,7 @@ class Dataset(torch.utils.data.Dataset):
                 self.list_images = glob.glob('../tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*ed_true_LS*png'.format(self.object_name))
         else:
             data_path = os.environ['HOME'] + '/tactile_localization/data_tactile_localization/{}/{}/grids/{}/'.format(args.sensor_name, self.object_name,args.grid_name)
+            print('data_path', data_path)
             self.list_images = glob.glob(data_path + 'local_shape_*1.png')
             if self.is_vision:
                 aux_list = []

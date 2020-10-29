@@ -146,7 +146,7 @@ import importlib
 
 def main():
     args = parser.parse_args()
-    args.moco_dim = 2048
+    args.moco_dim = 2450#2048
     args.lr = 0.0001
     if args.seed is not None:
         random.seed(args.seed)
@@ -399,7 +399,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True)
                 save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
                 print(time.time() - init, 'done eval for REAL --------------------------')
-                os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
                 model.eval()
                 if 0:
                     with_queue = 0
@@ -409,20 +409,20 @@ def main_worker(gpu, ngpus_per_node, args):
                         paths_pred, paths_target = evaluate(train_loader, model, criterion, path_data, args, use_current_queue = True)         
                         save_paths(paths_pred, paths_target, train_dataset, train_dataset, epoch, path_data, type_data, with_queue)
                         print(time.time() - init, 'done eval for TRAIN --------------------------')
-                        os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                        os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
                     except: pass
                     
                     type_data = 'true'
                     paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args, use_current_queue = True)         
                     save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue)
                     print(time.time() - init, 'done eval for TRUE --------------------------')
-                    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                    os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
                     
                     type_data='real'
                     paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True)
                     save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
                     print(time.time() - init, 'done eval for REAL --------------------------')
-                    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                    os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
                 
                 if 0:    
                     with_queue = 1
@@ -436,20 +436,20 @@ def main_worker(gpu, ngpus_per_node, args):
                         paths_pred, paths_target = evaluate(train_loader, model, criterion, path_data, args)         
                         save_paths(paths_pred, paths_target, train_dataset, train_dataset, epoch, path_data, type_data, with_queue)
                         print(time.time() - init, 'done eval for TRAIN --------------------------')
-                        os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                        os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
                     except: pass
                     
                     type_data= 'true'
                     paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args)         
                     save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue)
                     print(time.time() - init, 'done eval for TRUE --------------------------')
-                    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue)) 
+                    os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
                 
                     type_data='real'
                     paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args)
                     save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
                     print(time.time() - init, 'done eval for REAL --------------------------')
-                    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(epoch, type_data, with_queue))                 
+                    os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name))                 
                 
                 
     model.eval()

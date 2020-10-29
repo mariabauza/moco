@@ -65,9 +65,12 @@ class MoCo(nn.Module):
         #change_batch(self.encoder_k)
         #self.encoder_q.bn1 = torch.nn.Identity()
         #self.encoder_k.bn1 = torch.nn.Identity()
+        #if self.use_old_model:
+        #    self.encoder_q = nn.Sequential(*list(self.encoder_q.children())[:-1])
+        #    self.encoder_k = nn.Sequential(*list(self.encoder_k.children())[:-1])
         if self.use_old_model:
-            self.encoder_q = nn.Sequential(*list(self.encoder_q.children())[:-1])
-            self.encoder_k = nn.Sequential(*list(self.encoder_k.children())[:-1])
+            self.encoder_q = nn.Sequential(*list(self.encoder_q.children())[:-2])
+            self.encoder_k = nn.Sequential(*list(self.encoder_k.children())[:-2])
         if mlp:  # hack: brute-force replacement
             dim_mlp = self.encoder_q.fc.weight.shape[1]
             self.encoder_q.fc = nn.Sequential(nn.Linear(dim_mlp, dim_mlp), nn.ReLU(), self.encoder_q.fc)
@@ -165,6 +168,11 @@ class MoCo(nn.Module):
             w2 = w1 if x2 is x1 else x2.norm(p=2, dim=1, keepdim=True)
             return 1 - torch.mm(x1, x2.t()) / (w1 * w2.t()).clamp(min=eps)
 
+    def encoding(self,full_encoding, x):
+        #full_encoding =  self.mod(x)
+        size_aux = full_encoding.shape[2] * full_encoding.shape[3]
+        return full_encoding[:,:50,:].view((x.shape[0],50*size_aux))
+
     def forward(self, im_q, im_k = None, indexes= None, only_eval = False):
         """
         Input:
@@ -178,7 +186,8 @@ class MoCo(nn.Module):
         
         q = self.encoder_q(im_q)  # queries: NxC
         if self.use_old_model:
-            q = q.mean(2).mean(2)
+            #q = q.mean(2).mean(2)
+            q = self.encoding(q,im_q)
         q = nn.functional.normalize(q, dim=1)
         
         if only_eval: 
@@ -193,12 +202,12 @@ class MoCo(nn.Module):
             im_k, idx_unshuffle = self._batch_shuffle_ddp(im_k)
             k = self.encoder_k(im_k)  # keys: NxC
             if self.use_old_model:
-                k = k.mean(2).mean(2)
+                #k = k.mean(2).mean(2)
+                k = self.encoding(k,im_k)
             k = nn.functional.normalize(k, dim=1)
             # undo shuffle
             k = self._batch_unshuffle_ddp(k, idx_unshuffle)
         # compute logits
-        
         if self.use_cosine:
             l_pos = torch.nn.CosineSimilarity()(q,k).unsqueeze(-1)
             l_neg = self.cosine_distance(q,self.queue.T.clone().detach())
@@ -213,9 +222,9 @@ class MoCo(nn.Module):
         l_neg[np.arange(indexes.shape[0]),indexes] = 0 # Hack not add to loss
         #for i in range(5):
         #    print(i, l_pos[i] > l_neg[i, indexes[i]], 'Pos', l_pos[i], 'Neg', l_neg[i,indexes[i]], l_neg[i,indexes[:5]], print(torch.min(l_neg)))
-        #how_many = l_neg.shape[1]
-        #perm = np.random.permutation(how_many)[:-500]  #only consider last 500 for comparisons
-        #l_neg[:,perm] = -100 # Hack not add to loss
+        how_many = l_neg.shape[1]
+        perm = np.random.permutation(how_many)[:-20]  #only consider last 500 for comparisons
+        l_neg[:,perm] = 0 # Hack not add to loss
 
         # logits: Nx(1+K)
         logits = torch.cat([l_pos, l_neg], dim=1)
@@ -241,7 +250,8 @@ class MoCo(nn.Module):
         # compute query features
         q = self.encoder_q(im) 
         if self.use_old_model:
-            q = q.mean(2).mean(2)
+            #q = q.mean(2).mean(2)
+            q = self.encoding(q,im)
         q = nn.functional.normalize(q, dim=1)
         return q
 

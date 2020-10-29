@@ -1,3 +1,5 @@
+import open3d
+import pyrender
 import torch
 import glob
 import numpy as np
@@ -7,7 +9,7 @@ import shutil
 import sys
 import importlib
 
-sys.path.append('/home/mcube/tactile_localization/')
+sys.path.append(os.environ['HOME'] + '/tactile_localization/')
 from tactile_localization.constants import constants
 from tactile_localization.classes.grid import Grid2D, Grid3D
 from tactile_localization.classes.object_manipulator import Object3D
@@ -15,12 +17,12 @@ from tactile_localization.classes.local_shape import LocalShape, Transformation
 
 
 sensor_name = 'green_sensor'
-object_name = 'grease_view1'
+object_name = 'pin_view2'
 grid_name = 'final'
 sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
-list_images = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*npy'.format(object_name))
+list_images = glob.glob(os.environ['HOME'] +'/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*true_LS*npy'.format(object_name))
 list_images.sort(key=os.path.getmtime)
-list_images2 = glob.glob('/home/mcube/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_LS*npy'.format(object_name))
+list_images2 = glob.glob(os.environ['HOME'] +'/tactile_localization/data_tactile_localization/data_paper/{}/depth_clean/*predicted_LS*npy'.format(object_name))
 list_images2.sort(key=os.path.getmtime)
 
 sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
@@ -30,16 +32,20 @@ object_3D = Object3D(object_name, sensor, False, False)
 #aa = glob.glob('*npy')
 #for a in aa:   
 #cv2.imwrite(a.replace('.npy','.png'), (1-np.load(a))*255)
+print('Len: ', len(list_images))
 for item in list_images:
         
     trans_path = item.replace('ed_true_LS', "ed_trans")
     transformation = np.load(trans_path)
     png_item = item.replace('.npy','.png')
-    if not os.path.exists(png_item):
-        transformation[2,3] *= -1 
+    if not os.path.exists(png_item) or 1:
+        print(transformation[2,3])
+        if transformation[2,3] > 0:
+            transformation[2,3] *= -1
+        else: print('Already trans')
         np.save(trans_path, transformation)
+        #continue
         ls, transformation_real = object_3D.renderTransformation(Transformation(transformation))
-        
         if ls is None:
             print('No LS for item:', item)
             continue
@@ -48,7 +54,8 @@ for item in list_images:
             cv2.imwrite(png_item, ls.ls)
             print('Done:', item)
             
-            
+
+#assert(False)            
 for item in list_images:
         
     png_item = item.replace('.npy','.png')

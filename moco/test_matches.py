@@ -8,11 +8,6 @@ import shutil
 import sys
 import importlib
 
-sys.path.append('../tactile_localization/')
-from tactile_localization.constants import constants
-from tactile_localization.classes.grid import Grid2D, Grid3D
-from tactile_localization.classes.object_manipulator import Object3D
-from tactile_localization.classes.local_shape import LocalShape, Transformation
 import matplotlib.pyplot as plt
 import argparse
 #import pdb; pdb.set_trace()
@@ -20,19 +15,20 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--num_epoch", type=int, default=-1)
 parser.add_argument("-t", "--type_data", type=str, default=-1)
 parser.add_argument("-q", "--is_queue", type=int, default=-1)
+parser.add_argument("-o", "--object_name", type=str, default='grease_view1')
+
 args = parser.parse_args()
 num_epoch = args.num_epoch
 is_queue = args.is_queue
 type_data = args.type_data
 
 sensor_name = 'green_sensor'
-object_name = 'grease_view1'
+object_name = args.object_name #'grease_view1'
 #object_name = 'pin_view2'
 grid_name = 'face1'
 #grid_name = 'final'
-sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
 
-object_3D = Object3D(object_name, sensor, False, False)
+
 path_data = 'data/{}_{}'.format(object_name, grid_name)
 debug_data = path_data +'/23_oct_images_debug/'
 matches_data = path_data +'/23_oct_matches_{}_{}_queue={}/'
@@ -50,13 +46,14 @@ if type_data == 'true':
 print('Len list iamges:', len(list_images), len(list_images2))
 
 
-
+#'''
 sys.path.append('../tactile_localization/')
 from tactile_localization.constants import constants
 from tactile_localization.classes.grid import Grid2D, Grid3D
 from tactile_localization.classes.object_manipulator import Object3D    
 from tactile_localization.classes.local_shape import LocalShape, Transformation
 
+sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
 
 print('Generate data from:', sensor_name, object_name, grid_name)
 
@@ -67,7 +64,7 @@ if configs[-1]['grid_3D']:
     object_3D = Object3D(object_name, sensor, False, True)
 else:
     object_3D = Object3D(object_name, sensor, False, False)
-
+#'''
 
 def trans_dist(trans, all_tran):
     
@@ -134,6 +131,7 @@ for it in epochs:
     else: list_img = list_images2
     max_val = 250
     for it2, item in enumerate(list_img):
+        if 'head' in object_name and not os.path.exists(item.replace('npy','png')): continue
         ls1 = cv2.imread(item.replace('npy','png'))
         #max_val = np.amin(ls1) + 25
         ls1 = (ls1>max_val).astype(np.float32)*255.0
@@ -149,8 +147,8 @@ for it in epochs:
             count += 1; print('Path do not exist num:', count, path_trans_matches)
             continue  
         trans = np.load(path_trans)
-        if 'grease' not in object_name:
-            trans[2,3]  *= -1
+        #if 'grease' not in object_name:
+        #    trans[2,3]  *= -1
     
         matches = np.load(path_trans_matches)
         
