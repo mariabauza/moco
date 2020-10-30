@@ -12,14 +12,20 @@ from tactile_localization.classes.object_manipulator import Object3D
 from tactile_localization.classes.local_shape import LocalShape, Transformation
 import matplotlib.pyplot as plt
 import time
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("-o", "--object_name", type=str, default='grease_view1')
+
 
 sensor_name = np.load('moco/sensor_name.npy')
 
 sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
 
-object_name = np.load('moco/object_name.npy')
-grid_name = np.load('moco/grid_name.npy')  
-is_vision = np.load('moco/is_vision.npy') 
+args = parser.parse_args()
+object_name = args.object_name
+#object_name = np.load('moco/object_name.npy')
+grid_name = np.load('moco/grid_name.npy')
+is_vision = np.load('moco/is_vision.npy')
 change_gripper = np.load('moco/change_gripper.npy') 
 program_pid = np.load('moco/program_pid.npy') 
 

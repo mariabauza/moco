@@ -130,6 +130,8 @@ parser.add_argument('--change_gripper', action='store_true',
                     help='change x,y,z pose gripper')    
 parser.add_argument('--model_dir', default='', type=str, 
                     help='folder save checkpoints')                                        
+parser.add_argument('--date_name', default='', type=str, 
+                    help='Date used')                                        
 
 
 main_path = os.environ['HOME'] + '/'
@@ -189,8 +191,10 @@ def main_worker(gpu, ngpus_per_node, args):
     #####################################################################
     #####################################################################
     
-    
+    date_name = args.date_name
     object_name = args.object_name
+    if 'curved' in object_name:
+        args.lr /= 5
     sensor_name = args.sensor_name
     grid_name = args.grid_name
     print(object_name, sensor_name, grid_name)  
@@ -207,7 +211,7 @@ def main_worker(gpu, ngpus_per_node, args):
     
     import subprocess
     if not args.only_eval:
-        subprocess.Popen(["python3", "moco/generate_data.py"])
+        subprocess.Popen(["python3", "moco/generate_data.py", "-o", object_name])
     train_dataset = moco.dataset_simple.Dataset(args, is_train = True)
     val_dataset = moco.dataset_simple.Dataset(args)
     args.moco_k = train_dataset.len                     #TODO: TO BE UPDATED
@@ -318,7 +322,8 @@ def main_worker(gpu, ngpus_per_node, args):
                     checkpoint[key.replace('mod', 'encoder_q')] = checkpoint[key]
                     checkpoint[key.replace('mod', 'encoder_k')] = checkpoint.pop(key)
                 stat_dic = torch.load(standard_resume, map_location=loc)['state_dict']                
-                checkpoint['queue'] =  torch.zeros([2048, 6416]).cuda() #stat_dic['module.queue']#torch.zeros(1, dtype=torch.long) #nn.functional.normalize(queue, dim=0).cuda()
+                checkpoint['queue'] =  torch.zeros([2450, 20055]).cuda() #stat_dic['module.queue']#torch.zeros(1, dtype=torch.long) #nn.functional.normalize(queue, dim=0).cuda()
+                #checkpoint['queue'] =  torch.zeros([2048, 6416]).cuda() #stat_dic['module.queue']#torch.zeros(1, dtype=torch.long) #nn.functional.normalize(queue, dim=0).cuda()
                 checkpoint['queue_ptr'] = stat_dic['module.queue_ptr']#orch.zeros(1, dtype=torch.long)
                 #print(checkpoint.keys())
                 model.load_state_dict(checkpoint)
@@ -379,7 +384,7 @@ def main_worker(gpu, ngpus_per_node, args):
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                     and args.rank % ngpus_per_node == 0):
                 
-                if (epoch +1) % 10 == 0:
+                if (epoch +1) % 1 == 0:
                     save_best = False
                     if best_dist< np.median(dists):
                         best_dist = np.copy(np.median(dists))
@@ -389,67 +394,98 @@ def main_worker(gpu, ngpus_per_node, args):
                         'arch': args.arch,
                         'state_dict': model.state_dict(),
                         'optimizer' : optimizer.state_dict(),
-                    }, is_best=save_best, filename= path_data + '/models/{}/23_oct_checkpoint_{:04d}.pth.tar'.format(args.model_dir, epoch))
+                    }, is_best=save_best, filename= path_data + '/models/{}/{}_checkpoint_{:04d}.pth.tar'.format(args.model_dir, date_name, epoch))
                         # train for one epoch
             print('Time: ', time.time()-init)
             if (epoch +1) % 1== 0:
                 model.eval()
-                type_data='real'
+
                 with_queue = 0
+
+                type_data = 'true'
+                paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args, use_current_queue = True)         
+                save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue, date_name)
+                print(time.time() - init, 'done eval for TRUE --------------------------')
+                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                subprocess.Popen(command_test_matches)
+                #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
+
+
+                type_data='real'
                 paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True)
-                save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
+                save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue, date_name)
                 print(time.time() - init, 'done eval for REAL --------------------------')
-                os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
-                model.eval()
+                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                subprocess.Popen(command_test_matches)
+
+                type_data='real_train'
+                paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True, use_train=True)
+                save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue, date_name)
+                print(time.time() - init, 'done eval for REAL - use_train =True --------------------------')
+                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                subprocess.Popen(command_test_matches)
                 if 0:
                     with_queue = 0
                     print('Testing without new queue')
                     try: 
                         type_data = 'test'
                         paths_pred, paths_target = evaluate(train_loader, model, criterion, path_data, args, use_current_queue = True)         
-                        save_paths(paths_pred, paths_target, train_dataset, train_dataset, epoch, path_data, type_data, with_queue)
+                        save_paths(paths_pred, paths_target, train_dataset, train_dataset, epoch, path_data, type_data, with_queue, date_name)
                         print(time.time() - init, 'done eval for TRAIN --------------------------')
-                        os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
+                        #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
+                        command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), 'd', date_name]
+
+                        subprocess.Popen(command_test_matches)
                     except: pass
                     
                     type_data = 'true'
                     paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args, use_current_queue = True)         
-                    save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue)
+                    save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue, date_name)
                     print(time.time() - init, 'done eval for TRUE --------------------------')
-                    os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
+                    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                    subprocess.Popen(command_test_matches)
+                    #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
                     
                     type_data='real'
                     paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True)
-                    save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
+                    save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue, date_name)
                     print(time.time() - init, 'done eval for REAL --------------------------')
-                    os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
-                
-                if 0:    
+                    #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
+                    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                    subprocess.Popen(command_test_matches)
+
+                if 1:    
                     with_queue = 1
                     print('Updating queue')
-                    matches_path = path_data + '/23_oct_matches_{}_{}_queue={}/'.format(epoch, 'test', with_queue)
+                    matches_path = path_data + '/{}_matches_{}_{}_queue={}/'.format(date_name,epoch, 'test', with_queue)
                     update_queue(train_loader, model, args, matches_path)
                     print(time.time() - init, 'done queue')
-                
-                    try:
-                        type_data='test'
-                        paths_pred, paths_target = evaluate(train_loader, model, criterion, path_data, args)         
-                        save_paths(paths_pred, paths_target, train_dataset, train_dataset, epoch, path_data, type_data, with_queue)
-                        print(time.time() - init, 'done eval for TRAIN --------------------------')
-                        os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
-                    except: pass
+                    if 0:
+                        try:
+                            type_data='test'
+                            paths_pred, paths_target = evaluate(train_loader, model, criterion, path_data, args)         
+                            save_paths(paths_pred, paths_target, train_dataset, train_dataset, epoch, path_data, type_data, with_queue, date_name)
+                            print(time.time() - init, 'done eval for TRAIN --------------------------')
+                            #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
+                            command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                            subprocess.Popen(command_test_matches)
+                        except: pass
                     
                     type_data= 'true'
                     paths_pred, paths_target = evaluate(true_loader, model, criterion, path_data, args)         
-                    save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue)
+                    save_paths(paths_pred, paths_target, train_dataset, true_dataset, epoch, path_data, type_data, with_queue, date_name)
                     print(time.time() - init, 'done eval for TRUE --------------------------')
-                    os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
-                
+                    #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
+                    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                    subprocess.Popen(command_test_matches)
+
                     type_data='real'
                     paths_pred, paths_target = evaluate(real_loader, model, criterion, path_data, args)
-                    save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue)
+                    save_paths(paths_pred, paths_target, train_dataset, real_dataset, epoch, path_data, type_data, with_queue, date_name)
                     print(time.time() - init, 'done eval for REAL --------------------------')
-                    os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name))                 
+                    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                    subprocess.Popen(command_test_matches)
+                    #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name))                 
                 
                 
     model.eval()
@@ -458,20 +494,32 @@ def main_worker(gpu, ngpus_per_node, args):
     else: type_data = 'true'
     
     with_queue=1
-    matches_path = path_data + '/23_oct_matches_{}_{}_queue={}/'.format(epoch, 'test', with_queue)
+    matches_path = path_data + '/{}_matches_{}_{}_queue={}/'.format(date_name,epoch, 'test', with_queue)
     print('Updating queue')
     update_queue(train_loader, model, args, matches_path, load_from_saved =True)
     print('Evaluating loader')
     paths_pred, paths_target = evaluate(val_loader, model, criterion, path_data, args, use_current_queue = False)         
-    save_paths(paths_pred, paths_target, train_dataset, val_dataset, args.start_epoch-1, path_data, type_data, with_queue)
+    save_paths(paths_pred, paths_target, train_dataset, val_dataset, args.start_epoch-1, path_data, type_data, with_queue, date_name)
     print(args.start_epoch)
+    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+    subprocess.Popen(command_test_matches)
 
     
-    os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(args.start_epoch-1, type_data, with_queue) ) 
+    #os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(args.start_epoch-1, type_data, with_queue) ) 
 
-def save_paths(paths_pred, paths_target, train_dataset,val_dataset, epoch, path_data, type_data, with_queue):
-    matches_path = path_data + '/23_oct_matches_{}_{}_queue={}/'.format(epoch, type_data, with_queue)
+def save_paths(paths_pred, paths_target, train_dataset,val_dataset, epoch, path_data, type_data, with_queue, date_name):
+    saving_name = '/{}_matches_{}_{}_queue={}/'.format(date_name, '{}','{}','{}')
+    matches_path = path_data + saving_name.format(epoch, type_data, with_queue)
     os.makedirs(matches_path, exist_ok=True)
+    try: 
+        save_list_trans = path_data + saving_name[:-1].format('list_trans', type_data, with_queue) + '.npy'
+        save_list_images = path_data + saving_name[:-1].format('list_images', type_data, with_queue) + '.npy'
+        if not os.path.exists(save_list_trans):
+            np.save(save_list_trans, train_dataset.list_trans)
+            np.save(save_list_images, train_dataset.list_images)
+        print('saved')
+    except: pass
+
     for it_p, ind in enumerate(paths_target):
 
         path = val_dataset.list_trans[ind]
@@ -480,9 +528,11 @@ def save_paths(paths_pred, paths_target, train_dataset,val_dataset, epoch, path_
         list_pred = []
         list_LS_pred = []
         for i in paths_pred[it_p]:
+            if len(list_pred) > 50: break
             list_pred.append(train_dataset.list_trans[i])
             list_LS_pred.append(train_dataset.list_images[i])
         np.save(path_save, list_pred)
+        np.save(path_save.replace('predicted_matches', 'predicted_index_matches'), paths_pred[it_p])
         np.save(path_save.replace('predicted_matches', 'predicted_LS_matches'), list_LS_pred)
     #case_name = 'checkpoint={}_is_test={}_is_real={}_is_detectron2={}'.format(args.resume[:-8].split('_')[-1], args.is_test, args.is_real, args.is_detectron2)
     #np.save(path_data + '/models/' + args.model_dir + '/errors_{}.npy'.format(case_name), dists)
@@ -734,7 +784,7 @@ def accuracy(output, target, args, topk=(1,), do_match = False):
     with torch.no_grad():
         maxk = max(topk)
         batch_size = target.size(0)
-        _, pred = output.topk(50, 1, True, True); pred = pred.t()
+        _, pred = output.topk(output.shape[1], 1, True, True); pred = pred.t()
         correct = pred.eq(target.view(1, -1).expand_as(pred))
 
         res = []
@@ -767,7 +817,7 @@ def accuracy(output, target, args, topk=(1,), do_match = False):
             index_pred = []
             index_target = []
             for i in range(batch_size):
-                index_pred.append(pred[0:50,i].cpu().numpy())
+                index_pred.append(pred[:,i].cpu().numpy())
                 index_target.append(target[i].cpu().numpy())
             return res, index_pred, index_target
             '''

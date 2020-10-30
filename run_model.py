@@ -26,11 +26,14 @@ def execute(config):
         base_command += "--epoch {} ".format(config['num_epoch'])
         
         base_command += "--dist-url 'tcp://localhost:{}' ".format(config['localhost'])
+
+        base_command += "--date_name {} ".format(config['date_name'])
         
         if checkpoint:
             base_command += "--resume 20_oct_checkpoint_{}.pth.tar ".format(str(checkpoint).zfill(4))
         #base_command += "--resume 20_oct_checkpoint_{}.pth.tar ".format(str(119).zfill(4))
-        base_command += "--resume grease_view1_final_paper.pt ".format(str(checkpoint).zfill(4))
+        #base_command += "--resume grease_view1_final_paper.pt ".format(str(checkpoint).zfill(4))
+        #base_command += "--resume curved.pt ".format(str(checkpoint).zfill(4))
         if config['only_eval']:
             base_command += "--only_eval "
             if config['is_test']:
@@ -64,13 +67,15 @@ config['vis'] = 0
 config['is_vision'] = 0  #0, 1, 2 (tactile_vision)
 
 
-config['model_dir'] = '23_oct_paper_'
-
+config['date_name'] = '30_oct'
 # Paper
 config['object_name'] = 'pin_view2'
-config['object_name'] = 'grease_view1'
+#config['object_name'] = 'grease_view1'
+config['object_name'] = 'head_view1'
+#config['object_name'] = 'curved_view1'
 config['sensor_name'] = 'green_sensor'
 config['grid_name'] = 'face1'
+
 #config['grid_name'] = 'grid_depth_1'
 #config['grid_name'] = 'final'
 
@@ -90,7 +95,7 @@ config['start_epoch'] = 0
 #model_dirs = ['basic', 'binary'] #, 'poses', 'binary_poses']
 #model_dirs = ['poses', 'binary_poses', 'binary', 'basic']
 #model_dirs = ['binary_poses']
-model_dirs = ['poses_4']
+model_dirs = ['poses_5']
 print('Change loss same, depth max smaller')
 for model_dir in model_dirs:
     #for object_name in object_names:

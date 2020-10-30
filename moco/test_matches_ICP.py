@@ -11,19 +11,19 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import argparse
+import time
 #import pdb; pdb.set_trace()
+start = time.time()
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--num_epoch", type=int, default=-1)
 parser.add_argument("-t", "--type_data", type=str, default=-1)
 parser.add_argument("-q", "--is_queue", type=int, default=-1)
 parser.add_argument("-o", "--object_name", type=str, default='grease_view1')
-parser.add_argument("-d", "--date_name", type=str, default='29_oct')
 
 args = parser.parse_args()
 num_epoch = args.num_epoch
 is_queue = args.is_queue
 type_data = args.type_data
-date_name = args.date_name
 
 sensor_name = 'green_sensor'
 object_name = args.object_name #'grease_view1'
@@ -33,8 +33,8 @@ grid_name = 'face1'
 
 
 path_data = 'data/{}_{}'.format(object_name, grid_name)
-debug_data = path_data +'/{}_images_debug/'.format(date_name)
-matches_data = path_data +'/{}_matches_{}_{}_queue={}/'.format(date_name, '{}','{}','{}')
+debug_data = path_data +'/23_oct_images_debug/'
+matches_data = path_data +'/23_oct_matches_{}_{}_queue={}/'
 os.makedirs(debug_data, exist_ok = True)
 
 list_images = glob.glob(os.environ['HOME'] + '/tactile_localization/data_tactile_localization/{}/{}/grids/{}/transformation*1.npy'.format(sensor_name, object_name, grid_name))
@@ -49,9 +49,10 @@ if type_data == 'true':
 print('Len list iamges:', len(list_images), len(list_images2))
 
 
-#'''
+
 sys.path.append('../tactile_localization/')
 from tactile_localization.constants import constants
+from tactile_localization.utils import helper
 from tactile_localization.classes.grid import Grid2D, Grid3D
 from tactile_localization.classes.object_manipulator import Object3D    
 from tactile_localization.classes.local_shape import LocalShape, Transformation
@@ -60,6 +61,8 @@ sensor = importlib.import_module('sensors.{}.sensor_params'.format(sensor_name))
 
 print('Generate data from:', sensor_name, object_name, grid_name)
 
+avoid_z = False
+
 i = np.copy(grid_name); configs = []
 grid_aux = Grid2D(object_name, sensor, i)
 configs += [grid_aux.loadConfiguration()]
@@ -67,7 +70,7 @@ if configs[-1]['grid_3D']:
     object_3D = Object3D(object_name, sensor, False, True)
 else:
     object_3D = Object3D(object_name, sensor, False, False)
-#'''
+
 
 def trans_dist(trans, all_tran):
     
@@ -81,6 +84,13 @@ def trans_dist(trans, all_tran):
     
     err = np.mean(np.sqrt(np.sum((points1 - points2)**2, axis=-1)), axis=-1)
     return err
+
+def change_LS(ls):
+    ls = np.where(ls >= sensor.DEPTH_THRESHOLD-0.0001, sensor.MAX_VAL_DEPTH-sensor.DESIRED_DIST, ls)
+    ls += sensor.DESIRED_DIST
+
+    return ls
+            
 
 def compute_closest(trans, from_grid = False):
     error = []
@@ -106,6 +116,9 @@ for it in epochs:
     errors = []
     errors10 = []
     errors50 = []
+    errors_ICP = []
+    errors_ICP10 = []
+    errors_ICP50 = []
     rand_errors = []
     rand_errors10 = []
     rand_errors50 = []
@@ -158,13 +171,14 @@ for it in epochs:
         closest_error = np.load(path_dist_closest)
         closest_errors.append(closest_error)
         err_vec = []
+        err_ICP_vec = []
         pos = -1
         for i, match in enumerate(matches):            
-            
+            if i > 50: continue
             all_tran = np.load(match.replace('local_shape', 'transformation').replace('png', 'npy'), allow_pickle=True)
             #if type_data =='test': all_tran = all_tran.trans
             
-            err_i = trans_dist(trans, all_tran)
+            err_i =  object_3D.poseDistance(Transformation(all_tran), Transformation(trans), avoid_z = avoid_z)
             err_vec.append(err_i)
             if type_data != 'test': 
                 if abs(closest_error - err_i) < 0.00001:
@@ -188,13 +202,27 @@ for it in epochs:
                     plt.savefig(fig_name)
                     np.save(fig_name.replace('png', 'npy'), [item.replace('npy','png'), aa])
                 except: pass 
+
+            real_ls = LocalShape(np.load(item))
+            ICP_ls = cv2.resize(change_LS(real_ls.ls), (sensor.HEIGHT_PIXELS, sensor.WIDTH_PIXELS))
+            if 'true' not in item:
+                real_ls.realToBin(0.0006, sensor, True)
+                ICP_ls = ICP_ls*real_ls.ls + sensor.MAX_VAL_DEPTH*(1-real_ls.ls)
+            local_shape = LocalShape(cv2.imread(np.load(path_LS_matches)[i]))
+            local_shape.fromPNG(sensor)
+            transformation = Transformation(helper.single_filterreg_run(local_shape.ls, ICP_ls, 20, all_tran, sensor))
+            err_ICP_i = object_3D.poseDistance(transformation, Transformation(trans), avoid_z =avoid_z)
+            err_ICP_vec.append(err_ICP_i)
+
         
         errors.append(err_vec[1])
         errors10.append(np.amin(err_vec[:10]))
         errors50.append(np.amin(err_vec[:50]))
+        errors_ICP.append(err_ICP_vec[1])
+        errors_ICP10.append(np.amin(err_ICP_vec[:10]))
+        errors_ICP50.append(np.amin(err_ICP_vec[:50]))
         closest_pos.append(pos)
-        
-        
+
         ### Compute random errors
         rand_err_vec = []
         path_trans = glob.glob(matches[0].split('transform')[0] + 'transformation_[0-9]*npy')
@@ -209,16 +237,25 @@ for it in epochs:
         rand_errors.append(rand_err_vec[1])
         rand_errors10.append(np.amin(rand_err_vec[:10]))
         rand_errors50.append(np.amin(rand_err_vec[:50]))
+        print(it, type_data, is_queue,'Error:', np.round(np.median(errors)*1000,1), np.round(np.mean(errors)*1000, 1))
+        print(it, type_data, is_queue,'Error_ICP:', np.round(np.median(errors_ICP)*1000,1), np.round(np.mean(errors_ICP)*1000, 1))
         
     dict_error = {}
     dict_error['closest_errors'] = closest_errors
     dict_error['errors'] = errors
     dict_error['errors10'] = errors10
     dict_error['errors50'] = errors50
+    dict_error['errors_ICP'] = errors_ICP
+    dict_error['errors_ICP10'] = errors_ICP10
+    dict_error['errors_ICP50'] = errors_ICP50
     dict_error['rand_errors'] = rand_errors
     dict_error['rand_errors10'] = rand_errors10
     dict_error['rand_errors50'] = rand_errors50
     np.save( matches_data.format(it, type_data, is_queue) + 'dict_error_case={}.npy'.format(case_type), dict_error)
+
+
+
+
     if 0:
         closest_errors = np.round(np.array(closest_errors)*1000,1)
         errors = np.round(np.array(errors)*1000,1)
@@ -228,13 +265,26 @@ for it in epochs:
         rand_errors10 = np.round(np.array(rand_errors10)*1000,1)
         rand_errors50 = np.round(np.array(rand_errors50)*1000,1)
     print(it, type_data, is_queue,'Error:', np.round(np.median(errors)*1000,1), np.round(np.mean(errors)*1000, 1))
+    print(it, type_data, is_queue,'Error_ICP:', np.round(np.median(errors_ICP)*1000,1), np.round(np.mean(errors_ICP)*1000, 1))
     print('          ', np.round(np.median(rand_errors)*1000,1), 'random')
     print(it, type_data, is_queue,'Error10:', np.round(np.median(errors10)*1000,1), np.round(np.mean(errors10)*1000, 1))
+    print(it, type_data, is_queue,'Error_ICP10:', np.round(np.median(errors_ICP10)*1000,1), np.round(np.mean(errors_ICP10)*1000, 1))
     print('            ', np.round(np.median(rand_errors10)*1000,1), 'random')
     print(it, type_data, is_queue, 'Error50:', np.round(np.median(errors50)*1000,1), np.round(np.mean(errors50)*1000, 1))
+    print(it, type_data, is_queue,'Error_ICP50:', np.round(np.median(errors_ICP50)*1000,1), np.round(np.mean(errors_ICP50)*1000, 1))
     print('            ', np.round(np.median(rand_errors50)*1000,1), 'random')
     print(it, type_data, is_queue, 'Closest Error:',  np.round(np.median(closest_errors)*1000,1), np.round(np.mean(closest_errors)*1000,1))
     print('            ', np.round(np.median(rand_errors)*1000,1), 'random')
     arr_closest_pos = np.array(closest_pos)
     print(it, type_data, is_queue, 'Closest Pos:', np.median(arr_closest_pos[arr_closest_pos > 0]), np.mean(arr_closest_pos[arr_closest_pos > 0]), np.sum(arr_closest_pos > 0), len(arr_closest_pos))
-        
+    figname = matches_data.format(it, type_data, is_queue) + 'pose_estimate_{}_case={}.png'.format('{}',case_type)
+    sys.path.append('plots/')
+    from plot_over_epoch import plot_violin_v2
+    plot_violin_v2(object_name, rand_errors, closest_errors, errors, errors_ICP, errors10, errors_ICP10, figname=figname.format(''))
+    plot_violin_v2(object_name, rand_errors, closest_errors, rand_errors, errors_ICP, rand_errors10, errors_ICP10, figname=figname.format('random_ICP'))
+    plot_violin_v2(object_name, rand_errors, closest_errors, rand_errors, errors, rand_errors10, errors10, figname=figname.format('random'))
+    plot_violin_v2(object_name, rand_errors, closest_errors, errors, errors_ICP, errors50, errors_ICP50, figname=figname.format('50'))
+    plot_violin_v2(object_name, rand_errors, closest_errors, rand_errors, errors_ICP, rand_errors50, errors_ICP50, figname=figname.format('random_ICP_50'))
+    plot_violin_v2(object_name, rand_errors, closest_errors, rand_errors, errors, rand_errors50, errors50, figname=figname.format('random_50'))
+    plot_violin_v2(object_name, rand_errors, closest_errors, errors, errors_ICP, rand_errors, closest_errors, figname=figname.format('closest'))
+print('Time used: ', np.round(time.time() - start))
