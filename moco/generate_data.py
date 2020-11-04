@@ -27,7 +27,7 @@ object_name = args.object_name
 grid_name = np.load('moco/grid_name.npy')
 is_vision = np.load('moco/is_vision.npy')
 change_gripper = np.load('moco/change_gripper.npy') 
-program_pid = np.load('moco/program_pid.npy') 
+program_pid = np.load('moco/program_pid.npy', allow_pickle=True) 
 
 print('Generate data from:', sensor_name, object_name, grid_name)
 
@@ -125,7 +125,7 @@ def check_pid(pid):
 if __name__ == "__main__":
     last_path = None
     time.sleep(5)
-    while check_pid(program_pid):
+    while 'SLURM_ARRAY_TASK_ID' in os.environ or check_pid(program_pid):
         try:
             list_files = glob.glob('tmp_data/*{}*.npy'.format(object_name))
             list_files.sort(key=os.path.getmtime)

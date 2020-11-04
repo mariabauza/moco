@@ -210,8 +210,8 @@ def main_worker(gpu, ngpus_per_node, args):
     os.makedirs(path_data + '/models/' + args.model_dir, exist_ok = True)
     
     import subprocess
-    if not args.only_eval:
-        subprocess.Popen(["python3", "moco/generate_data.py", "-o", object_name])
+    #if not args.only_eval:
+    #    subprocess.Popen(["python3", "moco/generate_data.py", "-o", object_name])
     train_dataset = moco.dataset_simple.Dataset(args, is_train = True)
     val_dataset = moco.dataset_simple.Dataset(args)
     args.moco_k = train_dataset.len                     #TODO: TO BE UPDATED
@@ -369,7 +369,7 @@ def main_worker(gpu, ngpus_per_node, args):
     print(epoch)
     if not args.only_eval:
         best_dist = 1
-        for epoch in range(args.start_epoch, args.epochs):
+        for epoch in range(args.start_epoch, args.start_epoch+1):
             if epoch ==0: print('Inside')
             init = time.time()       
             if args.distributed:
@@ -379,16 +379,16 @@ def main_worker(gpu, ngpus_per_node, args):
 
             adjust_learning_rate(optimizer, epoch, args)
             # train for one epoch
-            acc1, acc5, paths_pred, paths_target = train(train_loader, model, criterion, optimizer, epoch, args)
+            #acc1, acc5, paths_pred, paths_target = train(train_loader, model, criterion, optimizer, epoch, args)
             print('Epoch: ', epoch, 'path_data', path_data)
             
-            np.save(path_data + '/models/' + args.model_dir +'acc1_epoch={}_{}.npy'.format(epoch, acc1.cpu().numpy()), acc1.cpu().numpy())
-            np.save(path_data + '/models/' + args.model_dir +'acc5_epoch={}_{}.npy'.format(epoch, acc5.cpu().numpy()), acc5.cpu().numpy())
+            #np.save(path_data + '/models/' + args.model_dir +'acc1_epoch={}_{}.npy'.format(epoch, acc1.cpu().numpy()), acc1.cpu().numpy())
+            #np.save(path_data + '/models/' + args.model_dir +'acc5_epoch={}_{}.npy'.format(epoch, acc5.cpu().numpy()), acc5.cpu().numpy())
             
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                     and args.rank % ngpus_per_node == 0):
                 
-                if (epoch +1) % 1 == 0:
+                if (epoch +1) % 1 == 0 and 0:
                     save_best = False
                     if best_dist< np.median(dists):
                         best_dist = np.copy(np.median(dists))
@@ -401,7 +401,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     }, is_best=save_best, filename= path_data + '/models/{}/{}_checkpoint_{:04d}.pth.tar'.format(args.model_dir, date_name, epoch))
                         # train for one epoch
             print('Time: ', time.time()-init)
-            if 0 and (epoch +1) % 1== 0:
+            if (epoch +1) % 1== 0:
                 model.eval()
 
                 with_queue = 0
@@ -410,7 +410,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 paths_pred, paths_target, vals_pred = evaluate(true_loader, model, criterion, path_data, args, use_current_queue = True)         
                 save_paths(paths_pred, paths_target, vals_pred, train_dataset, true_dataset, epoch, path_data, type_data, with_queue, date_name)
                 print(time.time() - init, 'done eval for TRUE --------------------------')
-                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  'test_' + date_name]
                 subprocess.Popen(command_test_matches)
                 #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
 
@@ -419,14 +419,14 @@ def main_worker(gpu, ngpus_per_node, args):
                 paths_pred, paths_target, vals_pred = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True)
                 save_paths(paths_pred, paths_target, vals_pred, train_dataset, real_dataset, epoch, path_data, type_data, with_queue, date_name)
                 print(time.time() - init, 'done eval for REAL --------------------------')
-                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',   'test_' + date_name]
                 subprocess.Popen(command_test_matches)
 
                 type_data='real_train'
                 paths_pred, paths_target, vals_pred = evaluate(real_loader, model, criterion, path_data, args, use_current_queue= True, use_train=True)
                 save_paths(paths_pred, paths_target, vals_pred, train_dataset, real_dataset, epoch, path_data, type_data, with_queue, date_name)
                 print(time.time() - init, 'done eval for REAL - use_train =True --------------------------')
-                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',   'test_' +date_name]
                 subprocess.Popen(command_test_matches)
                 if 0:
                     with_queue = 0
@@ -480,14 +480,14 @@ def main_worker(gpu, ngpus_per_node, args):
                     save_paths(paths_pred, paths_target, vals_pred, train_dataset, true_dataset, epoch, path_data, type_data, with_queue, date_name)
                     print(time.time() - init, 'done eval for TRUE --------------------------')
                     #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name)) 
-                    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',   'test_' + date_name]
                     subprocess.Popen(command_test_matches)
 
                     type_data='real'
                     paths_pred, paths_target, vals_pred = evaluate(real_loader, model, criterion, path_data, args)
                     save_paths(paths_pred, paths_target, vals_pred, train_dataset, real_dataset, epoch, path_data, type_data, with_queue, date_name)
                     print(time.time() - init, 'done eval for REAL --------------------------')
-                    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',  date_name]
+                    command_test_matches = ['python3','moco/test_matches.py','-n','{}'.format(epoch),'-t','{}'.format(type_data),'-q','{}'.format(with_queue),'-o','{}'.format(object_name), '-d',   'test_' + date_name]
                     subprocess.Popen(command_test_matches)
                     #os.system('python3 moco/test_matches.py -n {} -t {} -q {} -o {}'.format(epoch, type_data, with_queue, object_name))                 
                 
@@ -512,7 +512,7 @@ def main_worker(gpu, ngpus_per_node, args):
     #os.system('python3 moco/test_matches.py -n {} -t {} -q {}'.format(args.start_epoch-1, type_data, with_queue) ) 
 
 def save_paths(paths_pred, paths_target, vals_pred, train_dataset,val_dataset, epoch, path_data, type_data, with_queue, date_name):
-    saving_name = '/{}_matches_{}_{}_queue={}/'.format(date_name, '{}','{}','{}')
+    saving_name = '/test_{}_matches_{}_{}_queue={}/'.format(date_name, '{}','{}','{}')
     matches_path = path_data + saving_name.format(epoch, type_data, with_queue)
     os.makedirs(matches_path, exist_ok=True)
     save_list_trans = path_data + saving_name[:-1].format('list_trans', type_data, with_queue) + '.npy'
@@ -585,8 +585,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         top5.update(acc5[0], images[0].size(0))
 
         # compute gradient and do SGD step
-        optimizer.zero_grad()
-        if epoch != 0: 
+        if 0 or epoch != 0: 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -673,7 +672,7 @@ def evaluate(val_loader, model, criterion, path_data, args, use_current_queue = 
             paths_pred = np.copy(path_pred).tolist()
             vals_pred = np.copy(val_pred).tolist()
             paths_target = np.copy(path_target).tolist()
-            
+        
     return paths_pred, paths_target, vals_pred
     '''
         dists_all.append(dists)

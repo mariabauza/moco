@@ -19,11 +19,13 @@ parser.add_argument("-n", "--num_epoch", type=int, default=-1)
 parser.add_argument("-t", "--type_data", type=str, default=-1)
 parser.add_argument("-q", "--is_queue", type=int, default=-1)
 parser.add_argument("-o", "--object_name", type=str, default='grease_view1')
+parser.add_argument("-d", "--date_name", type=str, default='29_oct')
 
 args = parser.parse_args()
 num_epoch = args.num_epoch
 is_queue = args.is_queue
 type_data = args.type_data
+date_name = args.date_name
 
 sensor_name = 'green_sensor'
 object_name = args.object_name #'grease_view1'
@@ -33,8 +35,8 @@ grid_name = 'face1'
 
 
 path_data = 'data/{}_{}'.format(object_name, grid_name)
-debug_data = path_data +'/23_oct_images_debug/'
-matches_data = path_data +'/23_oct_matches_{}_{}_queue={}/'
+debug_data = path_data +'/{}_images_debug/'.format(date_name)
+matches_data = path_data +'/{}_matches_{}_{}_queue={}/'.format(date_name, '{}','{}','{}')
 os.makedirs(debug_data, exist_ok = True)
 
 list_images = glob.glob(os.environ['HOME'] + '/tactile_localization/data_tactile_localization/{}/{}/grids/{}/transformation*1.npy'.format(sensor_name, object_name, grid_name))
@@ -148,6 +150,8 @@ for it in epochs:
     max_val = 250
     for it2, item in enumerate(list_img):
         if 'head' in object_name and not os.path.exists(item.replace('npy','png')): continue
+        print(item)
+
         ls1 = cv2.imread(item.replace('npy','png'))
         #max_val = np.amin(ls1) + 25
         ls1 = (ls1>max_val).astype(np.float32)*255.0
@@ -183,24 +187,33 @@ for it in epochs:
             if type_data != 'test': 
                 if abs(closest_error - err_i) < 0.00001:
                     pos = np.copy(i)
-                
-            if 0 and i == 0: 
+            if (0 and i == 0) or (i == 9 and np.amin(err_vec) > 0.017): 
                 try:
                     aa = np.load(path_LS_matches)[i]
                 
                     ls2 = cv2.imread(aa)            
                     #max_val = np.amin(ls2) + 25
+
                     ls2 = (ls2>max_val).astype(np.float32)*255.0
                     #print(trans, all_tran)
                     #print(err_i)
                     plt.imshow(np.concatenate([ls1, ls2], axis=1).astype(np.uint8)); 
                     if 0: 
                         plt.show()
-                    fig_name = debug_data + 'best_match_epoch={}_type={}_case={}_err={}.png'.format(it, type_data, case_type,np.round(err_i*1000,1))
-                    plt.savefig(fig_name)
-                    fig_name = matches_data.format(it, type_data, is_queue) + '/best_match_epoch={}_type={}_case={}_err={}.png'.format(it, type_data, case_type,np.round(err_i*1000,1))
-                    plt.savefig(fig_name)
-                    np.save(fig_name.replace('png', 'npy'), [item.replace('npy','png'), aa])
+                    if i == 0:
+                        fig_name = debug_data + 'best_match_epoch={}_type={}_case={}_err={}.png'.format(it, type_data, case_type,np.round(err_i*1000,1))
+                        plt.savefig(fig_name)
+                        fig_name = matches_data.format(it, type_data, is_queue) + '/best_match_epoch={}_type={}_case={}_err={}.png'.format(it, type_data, case_type,np.round(err_i*1000,1))
+                        plt.savefig(fig_name)
+                        np.save(fig_name.replace('png', 'npy'), [item.replace('npy','png'), aa])
+                    if i == 9: 
+                        print('Error high: ', np.amin(err_vec), item)
+                        fig_name = debug_data + 'high_err10_match_epoch={}_type={}_case={}_err={}.png'.format(it, type_data, case_type,np.round(np.amin(err_vec)*1000,1))
+                        plt.savefig(fig_name)
+                        fig_name = matches_data.format(it, type_data, is_queue) + '/high_err10_match_epoch={}_type={}_case={}_err={}.png'.format(it, type_data, case_type,np.round(np.amin(err_vec)*1000,1))
+                        plt.savefig(fig_name)
+                        np.save(fig_name.replace('png', 'npy'), [item.replace('npy','png'), aa])
+                        np.save(fig_name.replace('high', 'path_high').replace('png', 'npy'), item)
                 except: pass 
 
             real_ls = LocalShape(np.load(item))

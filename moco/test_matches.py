@@ -111,7 +111,7 @@ for it in epochs:
     rand_errors50 = []
     closest_pos = []
     closest_errors = []
-    counter_path = matches_data.format(it, type_data, is_queue) + 'counter.npy'
+    counter_path = matches_data.format(it, type_data, is_queue) + 'test_counter.npy'
     
     
     
@@ -218,7 +218,7 @@ for it in epochs:
     dict_error['rand_errors'] = rand_errors
     dict_error['rand_errors10'] = rand_errors10
     dict_error['rand_errors50'] = rand_errors50
-    np.save( matches_data.format(it, type_data, is_queue) + 'dict_error_case={}.npy'.format(case_type), dict_error)
+    np.save( matches_data.format(it, type_data, is_queue) + 'test_dict_error_case={}.npy'.format(case_type), dict_error)
     if 0:
         closest_errors = np.round(np.array(closest_errors)*1000,1)
         errors = np.round(np.array(errors)*1000,1)

@@ -21,7 +21,7 @@ def execute(config):
     for checkpoint in np.arange(config['start_epoch'], config['num_epoch'], 10):
         if config['desired_checkpoint'] is not None:
             if checkpoint != config['desired_checkpoint']: continue
-        base_command = "python3  train_tactile.py -a resnet50 --lr 0.03 --batch-size 16 --multiprocessing-distributed --world-size 1 --rank 0 "
+        base_command = "python3  test_tactile.py -a resnet50 --lr 0.03 --batch-size 16 --multiprocessing-distributed --world-size 1 --rank 0 "
         
         base_command += "--epoch {} ".format(config['num_epoch'])
         
@@ -30,7 +30,7 @@ def execute(config):
         base_command += "--date_name {} ".format(config['date_name'])
         
         if checkpoint:
-            base_command += "--resume 20_oct_checkpoint_{}.pth.tar ".format(str(checkpoint).zfill(4))
+            base_command += "--resume {}_checkpoint_{}.pth.tar ".format(config['date_name'],str(checkpoint).zfill(4))
         #base_command += "--resume 20_oct_checkpoint_{}.pth.tar ".format(str(119).zfill(4))
         #base_command += "--resume grease_view1_final_paper.pt ".format(str(checkpoint).zfill(4))
         #base_command += "--resume curved.pt ".format(str(checkpoint).zfill(4))
@@ -71,7 +71,7 @@ config['date_name'] = '4_nov_k=20'
 # Paper
 
 try: id =os.environ['SLURM_ARRAY_TASK_ID']
-except: print('No id'); id = 0
+except: print('No id'); id = 3
 list_obj = ['pin_view2', 'grease_view1', 'head_view1', 'curved_view1']
 config['object_name'] = list_obj[int(id)]
 config['sensor_name'] = 'green_sensor'
@@ -104,12 +104,11 @@ for model_dir in model_dirs:
     # Train
     if 1:
         print('Starting epoch 119')
-        config['start_epoch'] = 0
-        config['desired_checkpoint'] = 0 # 0
+        config['start_epoch'] = 9
         
         
         config['only_eval'] = 0
-        config['desired_checkpoint'] = 0
+        config['desired_checkpoint'] = None
         print('Train')
         execute(config)
     if 0:
