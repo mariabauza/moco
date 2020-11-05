@@ -4,7 +4,7 @@
 #Slurm sbatch options
 #SBATCH -a 1-19
 #SBATCH -c 40
-#SBATCH -o logs/ICP_4_nov_k=20_%j_%a.log
+#SBATCH -o logs/ICP_4_nov_%j_%a.log
 #SBATCH --gres=gpu:volta:1
 #SBATCH --exclusive
 
@@ -25,6 +25,6 @@ export EGL_DEVICE_ID=$GPU_DEVICE_ORDINAL
 epoch="${SLURM_ARRAY_TASK_ID}0"
 echo 'Epoch:'
 echo $epoch
-for i in {curved_view1,} ; do python3 moco/test_matches_ICP.py -q 0 -n $epoch -t 'real' -o $i -d test_4_nov_k=20; done
+for i in {curved_view1,pin_view2,head_view1,grease_view1} ; do python3 moco/test_matches_ICP.py -q 1 -n $epoch -t 'real' -o $i -d test_4_nov; done
 #for i in {curved_view1,pin_view2,head_view1,grease_view1} ; do python3 moco/test_matches_ICP.py -q 0 -n 120 -t 'real' -o $i -d test_29_oct; done
 

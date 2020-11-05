@@ -222,9 +222,9 @@ class MoCo(nn.Module):
         l_neg[np.arange(indexes.shape[0]),indexes] = -100000000 # Hack not add to loss
         #for i in range(5):
         #    print(i, l_pos[i] > l_neg[i, indexes[i]], 'Pos', l_pos[i], 'Neg', l_neg[i,indexes[i]], l_neg[i,indexes[:5]], print(torch.min(l_neg)))
-        how_many = l_neg.shape[1]
-        perm = np.random.permutation(how_many)[:-20]  #only consider last 500 for comparisons
-        l_neg[:,perm] = -100000000 # Hack not add to loss
+        #how_many = l_neg.shape[1]
+        #perm = np.random.permutation(how_many)[:-20]  #only consider last 500 for comparisons
+        #l_neg[:,perm] = -100000000 # Hack not add to loss
 
         # logits: Nx(1+K)
         logits = torch.cat([l_pos, l_neg], dim=1)

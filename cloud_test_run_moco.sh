@@ -3,8 +3,8 @@
 
 #Slurm sbatch options
 #SBATCH -a 0-3
-#SBATCH -c 10
-#SBATCH -o logs/test_4_nov_k=20_%j_%a.log
+#SBATCH -c 40
+#SBATCH -o logs/test_4_nov_k=20_v2_%j_%a.log
 #SBATCH --gres=gpu:volta:1
 
 

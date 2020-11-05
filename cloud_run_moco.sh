@@ -2,10 +2,10 @@
 
 
 #Slurm sbatch options
-#SBATCH -a 0-3
+#SBATCH -a 3
 #SBATCH -c 40
-#SBATCH -o logs/4_nov_k=20_%j_%a.log
-#SBATCH --gres=gpu:volta:1
+#SBATCH -o logs/6_nov_%j_%a.log
+#SBATCH --gres=gpu:volta:2
 #SBATCH --exclusive
 
 echo 'TODOOOOOOOOOOOOOOOOOOOO: remember to also change date in run_model'

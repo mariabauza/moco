@@ -30,12 +30,15 @@ num_epoch = 200
 def plot_violin_v2(object_name, random, closest, best1, ICP1, best10,ICP10, figname):
   
   random_mean = np.mean(random)
+
   best1 /= random_mean
   best10 /= random_mean
   ICP1 /= random_mean
   ICP10 /= random_mean
   random /= random_mean
   closest /= random_mean
+  random_mean *= 1000.0
+
   print('Original median:', np.median(best1), 'Current median:', np.median(ICP1), 'With true, median:', np.median(ICP10))
 
   best1_df = pd.DataFrame({'pose_error':best1}) 

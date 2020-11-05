@@ -244,7 +244,7 @@ for it in epochs:
         rand_matches = np.array(path_trans)[perm]
         for i, match in enumerate(rand_matches):     
             all_tran = np.load(match)            
-            err_i = trans_dist(trans, all_tran)
+            err_i = object_3D.poseDistance(Transformation(trans), Transformation(all_tran))
             rand_err_vec.append(err_i)       
             
         rand_errors.append(rand_err_vec[1])

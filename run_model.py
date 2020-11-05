@@ -1,3 +1,4 @@
+import numpy as np
 import sys
 import os
 import time, pdb
@@ -67,7 +68,7 @@ config['vis'] = 0
 config['is_vision'] = 0  #0, 1, 2 (tactile_vision)
 
 
-config['date_name'] = '4_nov_k=20'
+config['date_name'] = '6_nov'
 # Paper
 
 try: id =os.environ['SLURM_ARRAY_TASK_ID']

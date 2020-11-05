@@ -160,12 +160,12 @@ for it in epochs:
     print('Epoch:', it)
     count = 0
 
-    num_contacts = 7
+    num_contacts = 20
     import copy
     num_examples = 100
     examples_so_far = 0
     for num_sensors in range(num_contacts,num_contacts+1):
-        if 0 and os.path.exists(matches_data.format(it, type_data, is_queue)  + 'errors_log_multicontact_{}_without_LS={}.npy'.format(num_sensors, True)): continue
+        if 1 and os.path.exists(matches_data.format(it, type_data, is_queue)  + 'avg3_errors_log_multicontact_{}_without_LS={}.npy'.format(num_sensors, True)): continue
         np.random.seed(10)
         masks_path = np.copy(list_images2)
         listLocalShapes = np.copy(list_images)
@@ -287,9 +287,18 @@ for it in epochs:
                 transformation = Transformation(np.load(best[it_sensor]))
                 if len(all_scores[it_sensor]) == 0: print('This fails:', masks_path[perm[0]]); continue
                 kin_it = np.random.randint(len(all_scores[it_sensor]))
-                transformation_kin = Transformation(np.load(all_coords[it_sensor][kin_it]))
+                kin_perm = np.random.permutation(len(all_scores[it_sensor]))
+                kin_err = []
+                found = 0
+                for kin_it in kin_perm:
+                    if found > 100: break
+                    if all_scores[it_sensor][kin_it] > -1000 and it_sensor > 0: continue 
+                    transformation_kin = Transformation(np.load(all_coords[it_sensor][kin_it]))
+                    kin_err.append(object_3D.poseDistance(transformation_kin, transformation_sensors[0]))
+                    found += 1
                 multi_errors[it_sensor][examples_so_far] = object_3D.poseDistance(transformation, transformation_sensors[0])
-                multi_kin_errors[it_sensor][examples_so_far] = object_3D.poseDistance(transformation_kin, transformation_sensors[0])
+                multi_kin_errors[it_sensor][examples_so_far] = np.mean(kin_err)
+
                 #print(it_sensor, 'Multi error:', len(multi_errors[it_sensor]), len(multi_kin_errors[it_sensor]))
                 print('Individual, sensor:' ,it_sensor, best_ind[it_sensor], 'Multi error:', np.round(multi_errors[it_sensor][examples_so_far]*1000,1), np.round(multi_kin_errors[it_sensor][examples_so_far]*1000,2))
                 #print('For kin is ind:', all_inds[it_sensor][kin_it])
@@ -299,8 +308,8 @@ for it in epochs:
                 print(examples_so_far, it_sensor+1, 'Multi errors:', np.round(np.median(multi_errors[it_sensor][:examples_so_far+1])*1000,1), np.round(np.mean(multi_errors[it_sensor][:examples_so_far+1])*1000,1))
                 print(examples_so_far, it_sensor+1, 'Multi kin errors:', np.round(np.median(multi_kin_errors[it_sensor][:examples_so_far+1])*1000,1), np.round(np.mean(multi_kin_errors[it_sensor][:examples_so_far+1])*1000,1))
                 if is_save:
-                    np.save(matches_data.format(it, type_data, is_queue)  + 'errors_log_multicontact_{}_without_LS={}.npy'.format(it_sensor+1, False), multi_errors[it_sensor])
-                    np.save(matches_data.format(it, type_data, is_queue)  + 'errors_log_multicontact_{}_without_LS={}.npy'.format(it_sensor+1, True), multi_kin_errors[it_sensor])
+                    np.save(matches_data.format(it, type_data, is_queue)  + 'avg3_errors_log_multicontact_{}_without_LS={}.npy'.format(it_sensor+1, False), multi_errors[it_sensor])
+                    np.save(matches_data.format(it, type_data, is_queue)  + 'avg3_errors_log_multicontact_{}_without_LS={}.npy'.format(it_sensor+1, True), multi_kin_errors[it_sensor])
             examples_so_far +=1
 
             print('Time used: ', np.round(time.time() - start))
@@ -323,9 +332,16 @@ plt.rc('ytick', labelsize=font_size)    # fontsize of the tick labels
 plt.rc('figure', titlesize=35)  # fontsize of the figure title         
 
 ### TODO: get random_mean!
-random_mean = 1 #np.mean(errors[0])
 save_path = matches_data.format(it, type_data, is_queue)
 
+errorpath = glob.glob(save_path + '/rand_dict_error_case=*.npy')[0]
+print( np.load(errorpath, allow_pickle=True).item().keys())
+errors = np.load(errorpath, allow_pickle=True).item(); 
+random_error = errors['rand_errors']
+print('errorpath')
+random_mean = np.mean(random_error)
+
+#import pdb; pdb.set_trace()
 
 fig, ax = plt.subplots(constrained_layout=True)
 fig.set_size_inches(10, 8)
@@ -349,12 +365,13 @@ contacts = np.arange(1,num_contacts+1)
 
 for i in contacts:
     print(i)
-    match_errors = np.load(save_path + '/errors_log_multicontact_{}_without_LS={}.npy'.format(i, False))/random_mean
-    match_no_LS_errors=np.load(save_path + '/errors_log_multicontact_{}_without_LS={}.npy'.format(i, True))/random_mean
+    match_errors = np.load(save_path + '/avg3_errors_log_multicontact_{}_without_LS={}.npy'.format(i, False))/random_mean
+    match_no_LS_errors=np.load(save_path + '/avg3_errors_log_multicontact_{}_without_LS={}.npy'.format(i, True))/random_mean
 
     print('Multi errors:', np.round(np.median(match_errors)*1000,1), np.round(np.mean(match_errors)*1000,1))
 
-
+    if i < 2:
+        print(match_no_LS_errors)
     mean_match_errors.append(np.mean(match_errors))
     std_match_errors.append(np.std(match_errors))
     median_match_errors.append(np.median(match_errors))
@@ -385,7 +402,7 @@ ax2 = plt.twinx()
 axes = plt.gca()
 mn, mx = axes.get_ylim()
 ax.set_ylim(0, top)
-ax2.set_ylim(0*random_mean, top*random_mean)
+ax2.set_ylim(0*random_mean*1000, top*random_mean*1000)
 
 ax.set_ylabel('Normalized Pose Error', labelpad=2)
 ax2.set_ylabel('Pose Error (mm)')
@@ -397,7 +414,7 @@ plt.title('{}'.format(object_name))
 plt.ylim(bottom=0)
 #plt.xticks(ind, ('Best1', 'ICP1', 'Best10', 'ICP10'))
 #plt.yticks(np.arange(0, 81, 10))
-print('Saving path:', save_path + '/plot_errors_log_multicontact_{}.png'.format(i))
+print('Saving path:', save_path + '/avg3_plot_errors_log_multicontact_{}.png'.format(i))
 
-plt.savefig(save_path + '/plot_errors_log_multicontact_{}.png'.format(i))
+plt.savefig(save_path + '/avg3_plot_errors_log_multicontact_{}.png'.format(i))
 

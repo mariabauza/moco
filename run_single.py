@@ -1,10 +1,10 @@
+import numpy as np
 import sys
 import os
 import time, pdb
 missing_libs = []
 try:import rospy
 except: missing_libs.append('rospy')
-import numpy as np
 import matplotlib.pyplot as plt
 import glob
 import copy
@@ -55,6 +55,10 @@ def execute(config):
         if config['vis']:
             base_command += "--vis "
         print(base_command)
+        match_path = 'test_{}_matches_{}_{}_queue={}/'.format(config['date_name'], checkpoint+1, 'real', 1)
+        print('trying?:', 'data/{}_face1/'.format(config['object_name']) + match_path)
+        if os.path.exists('data/{}_face1/'.format(config['object_name']) + match_path): continue
+        print('trying:', 'data/{}_face1/'.format(config['object_name']) + match_path)
         os.system(base_command)
         
 
